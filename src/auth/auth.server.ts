@@ -43,6 +43,9 @@ export function createAuth(env: WorkerEnv, origin: string) {
     // Every failed sign-in, including an expired OAuth state, returns to the
     // sign-in page with an `error` code.
     onAPIError: { errorURL: "/sign-in" },
+    // Alchemy's migrations own the schema. With an instance per request, the
+    // runtime check would introspect D1 on every request.
+    advanced: { database: { validateSchema: false } },
     // Must stay last: it hands cookies set by server-side `auth.api` calls to
     // Start's response.
     plugins: [tanstackStartCookies()],

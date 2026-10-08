@@ -1,8 +1,9 @@
 import { betterAuth } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 
 import type { WorkerEnv } from "../../alchemy.run";
-import { admitOnlyOwner } from "./owner-admission";
+import { admitOnlyOwner, normalizeOwnerEmail } from "./owner-admission";
 
 /**
  * better-auth for one origin this Worker serves. The origin sets the Google
@@ -34,6 +35,7 @@ export function createAuth(env: WorkerEnv, origin: string) {
       accountLinking: { enabled: false },
     },
     user: { validateUserInfo: admitOnlyOwner(env.OWNER_EMAIL) },
+    hooks: { before: discardHalfCreatedOwner(env.OWNER_EMAIL) },
     // Every failed sign-in, including an expired OAuth state, returns to the
     // sign-in page with an `error` code.
     onAPIError: { errorURL: "/sign-in" },
@@ -44,3 +46,34 @@ export function createAuth(env: WorkerEnv, origin: string) {
 }
 
 export type Auth = ReturnType<typeof createAuth>;
+
+/**
+ * Lets the Owner retry a first sign-in that failed partway.
+ *
+ * On D1, better-auth creates the Owner's user and their Google account as two
+ * separate writes, because D1 has no interactive transactions. If the second
+ * write fails, the user exists without an account, and with implicit linking
+ * disabled every later sign-in fails with `account_not_linked`. Before each
+ * OAuth callback, this deletes the Owner's user when it has no accounts, so
+ * the callback creates both again. Such a user never got a session, and a
+ * finished Owner can't reach zero accounts: better-auth refuses to unlink a
+ * user's last account while `accountLinking.allowUnlinkingAll` is unset.
+ */
+function discardHalfCreatedOwner(ownerEmail: string) {
+  const owner = normalizeOwnerEmail(ownerEmail);
+
+  return createAuthMiddleware(async (ctx) => {
+    if (ctx.path !== "/callback/:id") {
+      return;
+    }
+
+    const { internalAdapter } = ctx.context;
+    const existing = await internalAdapter.findUserByEmail(owner, { includeAccounts: true });
+
+    if (existing === null || existing.accounts.length > 0) {
+      return;
+    }
+
+    await internalAdapter.deleteUser(existing.user.id);
+  });
+}

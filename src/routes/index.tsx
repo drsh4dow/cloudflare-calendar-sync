@@ -2,10 +2,12 @@ import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { CalendarAccounts } from "@/components/calendar-accounts";
+import { SyncRulesSection } from "@/components/sync-rules";
 import { Button } from "@/components/ui/button";
 import { listCalendarAccounts } from "@/auth/calendar-accounts";
 import { authClient } from "@/auth/client";
 import { getSignedInOwner } from "@/auth/session";
+import { listSyncRules } from "@/sync-rules/sync-rules";
 
 type DashboardSearch = { error?: "linkFailed" };
 
@@ -28,13 +30,17 @@ export const Route = createFileRoute("/")({
 
     return { owner };
   },
-  loader: () => listCalendarAccounts(),
+  loader: async () => {
+    const [accounts, rules] = await Promise.all([listCalendarAccounts(), listSyncRules()]);
+
+    return { accounts, rules };
+  },
   component: Dashboard,
 });
 
 function Dashboard() {
   const { owner } = Route.useRouteContext();
-  const accounts = Route.useLoaderData();
+  const { accounts, rules } = Route.useLoaderData();
   const search = Route.useSearch();
   const navigate = useNavigate();
   const [signOutFailed, setSignOutFailed] = useState(false);
@@ -67,8 +73,9 @@ function Dashboard() {
           </Button>
         </div>
       </header>
-      <main className="mx-auto max-w-4xl p-6">
+      <main className="mx-auto flex max-w-4xl flex-col gap-10 p-6">
         <CalendarAccounts accounts={accounts} linkFailed={search.error === "linkFailed"} />
+        <SyncRulesSection rules={rules} accounts={accounts} />
       </main>
     </div>
   );

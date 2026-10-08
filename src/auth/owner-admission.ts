@@ -13,9 +13,7 @@ type IncomingIdentity = {
  * sign-in that creates the user, admits only the Owner's verified email.
  */
 export function admitOnlyOwner(ownerEmail: string) {
-  // better-auth lowercases provider emails before calling the gate; OWNER_EMAIL
-  // is typed by a person.
-  const owner = ownerEmail.trim().toLowerCase();
+  const owner = normalizeOwnerEmail(ownerEmail);
 
   return function admit(identity: IncomingIdentity): ValidateUserInfoResult | undefined {
     if (identity.source.action === "link-account") {
@@ -33,4 +31,12 @@ export function admitOnlyOwner(ownerEmail: string) {
 
     return { error: OWNER_ONLY, errorDescription: "This instance only admits its Owner." };
   };
+}
+
+/**
+ * OWNER_EMAIL as better-auth stores and compares emails: lowercased. The
+ * variable is typed by a person, so surrounding spaces are dropped too.
+ */
+export function normalizeOwnerEmail(ownerEmail: string): string {
+  return ownerEmail.trim().toLowerCase();
 }

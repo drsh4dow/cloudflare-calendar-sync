@@ -88,10 +88,6 @@ const config = defineConfig({
     ],
     options: { typeAware: true, typeCheck: true },
   },
-  test: {
-    // Remove once the first test lands; until then Vitest fails on an empty run.
-    passWithNoTests: true,
-  },
   resolve: { tsconfigPaths: true },
   // lazyPlugins returns undefined while Vite+ reads only the lint, fmt, or test
   // block, and its return type rejects that under exactOptionalPropertyTypes.

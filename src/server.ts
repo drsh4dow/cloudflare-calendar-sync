@@ -33,6 +33,8 @@ export default {
     // only refreshes tokens, which needs none; sign-in and linking do.
     const auth = createAuth(env, undefined);
 
+    // A Run in which a Sync Rule failed rejects, so Cloudflare reports the
+    // invocation as failed.
     await effectRunner(env, auth)(run);
   },
 } satisfies ExportedHandler<WorkerEnv>;

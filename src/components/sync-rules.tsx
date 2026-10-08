@@ -2,6 +2,7 @@ import { useRouter } from "@tanstack/react-router";
 import { Schema } from "effect";
 import { type FormEvent, useId, useState } from "react";
 
+import { LocalTime } from "@/components/local-time";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -14,6 +15,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -47,6 +49,7 @@ import {
 } from "@/components/ui/table";
 import type { ListedCalendarAccount } from "@/auth/calendar-accounts";
 import { type Calendar, isReadable, isWritable } from "@/google/calendar";
+import type { SyncRuleStatus } from "@/runs/run-status";
 import {
   defaultSyncRuleSettings,
   Mode,
@@ -60,7 +63,13 @@ type SyncRulesSectionProps = {
   accounts: ReadonlyArray<ListedCalendarAccount>;
 };
 
-export function SyncRulesSection({ rules, accounts }: SyncRulesSectionProps) {
+export function SyncRulesSection({
+  rules,
+  accounts,
+  statuses,
+}: SyncRulesSectionProps & { statuses: ReadonlyArray<SyncRuleStatus> }) {
+  const statusByRule = new Map(statuses.map((status) => [status.syncRuleId, status]));
+
   return (
     <section aria-labelledby="sync-rules-heading" className="flex flex-col gap-4">
       <div className="flex items-center justify-between gap-4">
@@ -79,6 +88,7 @@ export function SyncRulesSection({ rules, accounts }: SyncRulesSectionProps) {
               <TableHead>Target Calendar</TableHead>
               <TableHead>Mode</TableHead>
               <TableHead>All-day events</TableHead>
+              <TableHead>Last synced</TableHead>
               <TableHead>
                 <span className="sr-only">Actions</span>
               </TableHead>
@@ -86,7 +96,12 @@ export function SyncRulesSection({ rules, accounts }: SyncRulesSectionProps) {
           </TableHeader>
           <TableBody>
             {rules.map((rule) => (
-              <SyncRuleTableRow key={rule.id} rule={rule} accounts={accounts} />
+              <SyncRuleTableRow
+                key={rule.id}
+                rule={rule}
+                accounts={accounts}
+                status={statusByRule.get(rule.id)}
+              />
             ))}
           </TableBody>
         </Table>
@@ -129,9 +144,11 @@ function describeCalendar(label: CalendarLabel): string {
 type SyncRuleTableRowProps = {
   rule: SyncRule;
   accounts: ReadonlyArray<ListedCalendarAccount>;
+  /** Absent until a Run applies the rule. */
+  status: SyncRuleStatus | undefined;
 };
 
-function SyncRuleTableRow({ rule, accounts }: SyncRuleTableRowProps) {
+function SyncRuleTableRow({ rule, accounts, status }: SyncRuleTableRowProps) {
   const source = labelCalendar(accounts, rule.sourceCalendarAccountId, rule.sourceCalendarId);
   const target = labelCalendar(accounts, rule.targetCalendarAccountId, rule.targetCalendarId);
 
@@ -145,6 +162,9 @@ function SyncRuleTableRow({ rule, accounts }: SyncRuleTableRowProps) {
       </TableCell>
       <TableCell>{modeLabel(rule)}</TableCell>
       <TableCell>{rule.includeAllDayEvents ? "Copied" : "Skipped"}</TableCell>
+      <TableCell>
+        <LastSynced status={status} />
+      </TableCell>
       <TableCell>
         <div className="flex justify-end gap-2">
           <EditSyncRuleDialog rule={rule} source={source} target={target} />
@@ -160,6 +180,24 @@ function CalendarName({ label }: { label: CalendarLabel }) {
     <div className="flex flex-col">
       <span>{label.name}</span>
       <span className="text-xs text-muted-foreground">{label.email}</span>
+    </div>
+  );
+}
+
+/** When a Run last applied the Sync Rule without a failure, and whether the last Run failed it. */
+function LastSynced({ status }: { status: SyncRuleStatus | undefined }) {
+  if (status === undefined) {
+    return <span className="text-muted-foreground">Waiting for the next Run</span>;
+  }
+
+  return (
+    <div className="flex flex-col items-start gap-1">
+      {status.lastSucceededAt === null ? (
+        <span>Never</span>
+      ) : (
+        <LocalTime value={status.lastSucceededAt} />
+      )}
+      {status.lastRunSucceeded ? null : <Badge variant="destructive">Last Run failed</Badge>}
     </div>
   );
 }

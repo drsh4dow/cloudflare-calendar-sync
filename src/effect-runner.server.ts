@@ -5,10 +5,11 @@ import type { WorkerEnv } from "../alchemy.run";
 import type { Auth } from "./auth/auth.server";
 import { accessTokensForOwner } from "./auth/calendar-accounts.server";
 import { GoogleCalendar } from "./google/calendar-client";
+import { RunStatusStore } from "./runs/run-status.server";
 import { SyncRules } from "./sync-rules/sync-rules.server";
 
 /** The services every Effect program in the Worker can use. */
-export type AppServices = SyncRules | GoogleCalendar;
+export type AppServices = SyncRules | RunStatusStore | GoogleCalendar;
 
 /** Runs an Effect program, resolving with its result or rejecting with its failure. */
 export type RunEffect = <A, E>(program: Effect.Effect<A, E, AppServices>) => Promise<A>;
@@ -29,7 +30,9 @@ export type RunEffect = <A, E>(program: Effect.Effect<A, E, AppServices>) => Pro
  */
 export function effectRunner(env: WorkerEnv, auth: Auth): RunEffect {
   const services = Layer.mergeAll(
-    SyncRules.layer.pipe(Layer.provide(D1Client.layer({ db: env.DB }))),
+    Layer.mergeAll(SyncRules.layer, RunStatusStore.layer).pipe(
+      Layer.provide(D1Client.layer({ db: env.DB })),
+    ),
     GoogleCalendar.layer.pipe(Layer.provide(accessTokensForOwner(auth, env.OWNER_EMAIL))),
   );
 

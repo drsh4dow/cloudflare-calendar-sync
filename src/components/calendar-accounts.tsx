@@ -1,6 +1,7 @@
 import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { LocalTime } from "@/components/local-time";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -22,14 +23,18 @@ import {
   type ListedCalendarAccount,
 } from "@/auth/calendar-accounts";
 import { type Calendar, isReadable, isWritable } from "@/google/calendar";
+import type { CalendarAccountProblem, CalendarAccountStatus } from "@/runs/run-status";
 
 type CalendarAccountsProps = {
   accounts: ReadonlyArray<ListedCalendarAccount>;
+  statuses: ReadonlyArray<CalendarAccountStatus>;
   /** Google sent the browser back from connecting or reconnecting with an error. */
   linkFailed: boolean;
 };
 
-export function CalendarAccounts({ accounts, linkFailed }: CalendarAccountsProps) {
+export function CalendarAccounts({ accounts, statuses, linkFailed }: CalendarAccountsProps) {
+  const statusByAccount = new Map(statuses.map((status) => [status.calendarAccountId, status]));
+
   const [connecting, setConnecting] = useState(false);
   const [connectFailed, setConnectFailed] = useState(false);
 
@@ -63,7 +68,11 @@ export function CalendarAccounts({ accounts, linkFailed }: CalendarAccountsProps
       ) : null}
       <ul className="flex flex-col gap-4">
         {accounts.map((account) => (
-          <CalendarAccountItem key={account.id} account={account} />
+          <CalendarAccountItem
+            key={account.id}
+            account={account}
+            status={statusByAccount.get(account.id)}
+          />
         ))}
       </ul>
     </section>
@@ -72,7 +81,13 @@ export function CalendarAccounts({ accounts, linkFailed }: CalendarAccountsProps
 
 type AccountProblem = "reconnectFailed" | "signInAgain" | "disconnectFailed";
 
-function CalendarAccountItem({ account }: { account: ListedCalendarAccount }) {
+type CalendarAccountItemProps = {
+  account: ListedCalendarAccount;
+  /** Absent until a Run uses the account. */
+  status: CalendarAccountStatus | undefined;
+};
+
+function CalendarAccountItem({ account, status }: CalendarAccountItemProps) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<AccountProblem | null>(null);
@@ -111,7 +126,13 @@ function CalendarAccountItem({ account }: { account: ListedCalendarAccount }) {
     setPending(false);
   }
 
-  const needsReconnect = account.listing.kind === "needsReconnect";
+  // Listing the Calendars just now and the last Run can each find that Google
+  // refuses the account's grant; the Run also writes events, which listing
+  // doesn't try. Either one asks for a reconnect.
+  const lastRunProblem = status?.lastRunProblem ?? null;
+
+  const needsReconnect =
+    account.listing.kind === "needsReconnect" || lastRunProblem === "needsReconnect";
 
   return (
     <li className="rounded-lg border">
@@ -119,6 +140,7 @@ function CalendarAccountItem({ account }: { account: ListedCalendarAccount }) {
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium">{account.email}</span>
           {account.isSignInAccount ? <Badge variant="secondary">Sign-in account</Badge> : null}
+          {needsReconnect ? <Badge variant="destructive">Needs reconnect</Badge> : null}
         </div>
         <div className="flex shrink-0 gap-2">
           <Button
@@ -134,9 +156,31 @@ function CalendarAccountItem({ account }: { account: ListedCalendarAccount }) {
           )}
         </div>
       </div>
+      {status === undefined || lastRunProblem === null ? null : (
+        <LastRunProblem lastRunAt={status.lastRunAt} problem={lastRunProblem} />
+      )}
       {problem === null ? null : <AccountProblemAlert problem={problem} />}
       <CalendarList listing={account.listing} />
     </li>
+  );
+}
+
+type LastRunProblemProps = {
+  lastRunAt: Date;
+  problem: CalendarAccountProblem;
+};
+
+function LastRunProblem({ lastRunAt, problem }: LastRunProblemProps) {
+  const consequences: Record<CalendarAccountProblem, string> = {
+    needsReconnect: "Google refused its access. Reconnect it, and the next Run clears this.",
+    unavailable: "Google Calendar didn't answer as expected. The next Run tries again.",
+  };
+
+  return (
+    <p className="border-b px-4 py-3 text-sm text-destructive">
+      The last Run, started <LocalTime value={lastRunAt} />, couldn't use this account.{" "}
+      {consequences[problem]}
+    </p>
   );
 }
 

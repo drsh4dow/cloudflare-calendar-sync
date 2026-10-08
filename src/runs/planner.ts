@@ -40,6 +40,14 @@ export type PlanInput = {
  * Events without the rule's tag are never written, and Copies that have ended
  * are left as they are. A Copy whose Source Event the listing lacks is
  * deleted, so the listings must be complete.
+ *
+ * A Source Event isn't copied when the Target Calendar already holds the same
+ * meeting and the Owner hasn't declined it there, so a meeting the Owner was
+ * invited to on both addresses shows once. Two events are the same meeting
+ * when their iCalUIDs and their occurrences' original starts both match. Every
+ * occurrence of a series shares the iCalUID, so the start tells occurrences
+ * apart. The original start is Google's `originalStartTime` when present,
+ * otherwise the start, so an occurrence still matches after it moves.
  */
 export function planCopies({
   rule,
@@ -48,17 +56,22 @@ export function planCopies({
   now,
 }: PlanInput): ReadonlyArray<CopyOperation> {
   const unclaimedCopies = new Map<string, CalendarEvent>();
+  const meetingsInTarget = new Set<string>();
 
   for (const event of targetEvents) {
     if (event.syncRuleId === rule.id) {
       unclaimedCopies.set(event.id, event);
+    }
+
+    if (event.ownerResponse !== "declined") {
+      meetingsInTarget.add(meetingOccurrence(event));
     }
   }
 
   const operations: Array<CopyOperation> = [];
 
   for (const event of sourceEvents) {
-    if (!shouldCopy(event)) {
+    if (!shouldCopy(event) || meetingsInTarget.has(meetingOccurrence(event))) {
       continue;
     }
 
@@ -85,10 +98,36 @@ export function planCopies({
 
 /**
  * Whether a Run copies the event. Only Source Events are copied, so Copies
- * never chain, and only timed ones.
+ * never chain, and only timed ones. Events marked free, events the Owner
+ * declined, and working-location events don't block time.
  */
 function shouldCopy(event: CalendarEvent): boolean {
-  return event.syncRuleId === undefined && event.details.time.kind === "timed";
+  if (event.syncRuleId !== undefined || event.details.time.kind !== "timed") {
+    return false;
+  }
+
+  if (event.eventType === "workingLocation") {
+    return false;
+  }
+
+  return event.details.busy && event.ownerResponse !== "declined";
+}
+
+/** The meeting occurrence the event stands for, equal across Calendars (see `planCopies`). */
+function meetingOccurrence(event: CalendarEvent): string {
+  const start = event.originalStart ?? event.details.time;
+
+  switch (start.kind) {
+    case "timed":
+      return `${event.iCalUID} ${DateTime.formatIso(start.start)}`;
+    case "allDay":
+      return `${event.iCalUID} ${start.startDate}`;
+    default: {
+      const exhaustive: never = start;
+
+      return exhaustive;
+    }
+  }
 }
 
 /** The write that makes the Target Calendar show the Copy, if any. */

@@ -16,7 +16,7 @@ describe("Owner admission", () => {
     expect(verdict).toBeUndefined();
   });
 
-  test("another Google account is turned away before a user is created", () => {
+  test("another Google account's first sign-in is turned away", () => {
     const verdict = admit({
       user: { email: "visitor@example.com", emailVerified: true },
       source: { ...googleSignIn, action: "create-user" },

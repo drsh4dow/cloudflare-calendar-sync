@@ -1,4 +1,3 @@
-import { redirect } from "@tanstack/react-router";
 import { Effect, Layer, Redacted, Schema } from "effect";
 
 import type { Calendar } from "@/google/calendar";
@@ -8,6 +7,7 @@ import {
   GoogleCalendar,
 } from "@/google/calendar-client";
 import type { Auth } from "./auth.server";
+import { requireOwnerSession } from "./session.server";
 
 export type CalendarAccount = {
   /** better-auth's account row id. */
@@ -33,12 +33,7 @@ export async function ownerCalendarAccounts(
   auth: Auth,
   headers: Headers,
 ): Promise<ReadonlyArray<CalendarAccount>> {
-  const session = await auth.api.getSession({ headers });
-
-  if (session === null) {
-    throw redirect({ to: "/sign-in" });
-  }
-
+  const session = await requireOwnerSession(auth, headers);
   const { internalAdapter } = await auth.$context;
   const accounts = await internalAdapter.findAccounts(session.user.id);
 

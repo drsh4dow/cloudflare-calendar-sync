@@ -63,6 +63,8 @@ function tomorrowAt(hour: number): EventTime {
 function meeting(id: string, time: EventTime): CalendarEvent {
   return {
     id,
+    iCalUID: `${id}@google.com`,
+    eventType: "default",
     details: { title: "Design review", time, visibility: "default", busy: true },
     hasReminders: true,
     hasAttendees: true,

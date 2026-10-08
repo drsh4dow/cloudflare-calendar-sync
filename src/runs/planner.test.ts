@@ -27,6 +27,8 @@ const tomorrowMorning = timed("2026-10-10T09:00:00Z", "2026-10-10T10:00:00Z");
 function sourceEvent(id: string, time: EventTime): CalendarEvent {
   return {
     id,
+    iCalUID: `${id}@google.com`,
+    eventType: "default",
     details: {
       title: "Client call",
       description: "Agenda",
@@ -40,10 +42,26 @@ function sourceEvent(id: string, time: EventTime): CalendarEvent {
   };
 }
 
+/**
+ * The Owner's accepted invitation to an occurrence of a recurring meeting
+ * that its series scheduled at `scheduled`, and that takes place at `time`.
+ */
+function occurrence(id: string, scheduled: EventTime, time: EventTime = scheduled): CalendarEvent {
+  return {
+    ...sourceEvent(id, time),
+    iCalUID: "series1@example.com",
+    originalStart: scheduled,
+    ownerResponse: "accepted",
+  };
+}
+
 /** The Copy as the Target Calendar's listing returns it after a Run wrote it. */
 function listed(copy: Copy): CalendarEvent {
   return {
     id: copy.id,
+    iCalUID: `${copy.id}@google.com`,
+    eventType: "default",
+
     syncRuleId: copy.syncRuleId,
     details: copy.details,
     hasReminders: false,
@@ -235,6 +253,175 @@ describe("planCopies", () => {
     });
 
     expect(operations).toEqual([]);
+  });
+
+  test("skips an event the Owner declined", () => {
+    const declined: CalendarEvent = {
+      ...sourceEvent("event1", tomorrowMorning),
+      ownerResponse: "declined",
+    };
+
+    expect(planCopies({ rule, sourceEvents: [declined], targetEvents: [], now })).toEqual([]);
+  });
+
+  test("copies tentative and unanswered invitations", () => {
+    const tentative: CalendarEvent = {
+      ...sourceEvent("event1", tomorrowMorning),
+      ownerResponse: "tentative",
+    };
+
+    const unanswered: CalendarEvent = {
+      ...sourceEvent("event2", tomorrowMorning),
+      ownerResponse: "needsAction",
+    };
+
+    expect(
+      planCopies({ rule, sourceEvents: [tentative, unanswered], targetEvents: [], now }),
+    ).toEqual([
+      { kind: "create", copy: expect.objectContaining({ sourceEventId: "event1" }) },
+      { kind: "create", copy: expect.objectContaining({ sourceEventId: "event2" }) },
+    ]);
+  });
+
+  test("skips an event marked free", () => {
+    const source = sourceEvent("event1", tomorrowMorning);
+    const free: CalendarEvent = { ...source, details: { ...source.details, busy: false } };
+
+    expect(planCopies({ rule, sourceEvents: [free], targetEvents: [], now })).toEqual([]);
+  });
+
+  test("copies out-of-office and focus-time events as busy Copies", () => {
+    const outOfOffice: CalendarEvent = {
+      ...sourceEvent("event1", tomorrowMorning),
+      eventType: "outOfOffice",
+    };
+
+    const focusTime: CalendarEvent = {
+      ...sourceEvent("event2", tomorrowMorning),
+      eventType: "focusTime",
+    };
+
+    const busyCopy = expect.objectContaining({ details: expect.objectContaining({ busy: true }) });
+
+    expect(
+      planCopies({ rule, sourceEvents: [outOfOffice, focusTime], targetEvents: [], now }),
+    ).toEqual([
+      { kind: "create", copy: busyCopy },
+      { kind: "create", copy: busyCopy },
+    ]);
+  });
+
+  test("skips working-location events", () => {
+    const workingLocation: CalendarEvent = {
+      ...sourceEvent("event1", tomorrowMorning),
+      eventType: "workingLocation",
+    };
+
+    expect(planCopies({ rule, sourceEvents: [workingLocation], targetEvents: [], now })).toEqual(
+      [],
+    );
+  });
+
+  test("skips a meeting the Target Calendar already holds", () => {
+    const sourceInvitation: CalendarEvent = {
+      ...sourceEvent("sourceinvitation1", tomorrowMorning),
+      iCalUID: "meeting1@example.com",
+      ownerResponse: "accepted",
+    };
+
+    const targetInvitation: CalendarEvent = {
+      ...sourceEvent("targetinvitation1", tomorrowMorning),
+      iCalUID: "meeting1@example.com",
+      ownerResponse: "needsAction",
+    };
+
+    expect(
+      planCopies({
+        rule,
+        sourceEvents: [sourceInvitation],
+        targetEvents: [targetInvitation],
+        now,
+      }),
+    ).toEqual([]);
+  });
+
+  test("copies a meeting the Owner declined in the Target Calendar", () => {
+    const sourceInvitation: CalendarEvent = {
+      ...sourceEvent("sourceinvitation1", tomorrowMorning),
+      iCalUID: "meeting1@example.com",
+      ownerResponse: "accepted",
+    };
+
+    const declinedInTarget: CalendarEvent = {
+      ...sourceEvent("targetinvitation1", tomorrowMorning),
+      iCalUID: "meeting1@example.com",
+      ownerResponse: "declined",
+    };
+
+    expect(
+      planCopies({
+        rule,
+        sourceEvents: [sourceInvitation],
+        targetEvents: [declinedInTarget],
+        now,
+      }),
+    ).toEqual([
+      { kind: "create", copy: expect.objectContaining({ sourceEventId: "sourceinvitation1" }) },
+    ]);
+  });
+
+  test("deletes the Copy of an event the Owner declined after it was copied", () => {
+    const invitation: CalendarEvent = {
+      ...sourceEvent("event1", tomorrowMorning),
+      ownerResponse: "needsAction",
+    };
+
+    const [copy] = copiesOf([invitation]);
+
+    expect(
+      planCopies({
+        rule,
+        sourceEvents: [{ ...invitation, ownerResponse: "declined" }],
+        targetEvents: [copy!],
+        now,
+      }),
+    ).toEqual([{ kind: "delete", copyId: copy!.id }]);
+  });
+
+  test("tells occurrences of a recurring meeting apart", () => {
+    const operations = planCopies({
+      rule,
+      sourceEvents: [
+        occurrence("source_20261010T090000Z", tomorrowMorning),
+        occurrence(
+          "source_20261011T090000Z",
+          timed("2026-10-11T09:00:00Z", "2026-10-11T10:00:00Z"),
+        ),
+      ],
+      targetEvents: [occurrence("target_20261010T090000Z", tomorrowMorning)],
+      now,
+    });
+
+    expect(operations).toEqual([
+      {
+        kind: "create",
+        copy: expect.objectContaining({ sourceEventId: "source_20261011T090000Z" }),
+      },
+    ]);
+  });
+
+  test("matches a moved occurrence by when its series scheduled it", () => {
+    const moved = occurrence(
+      "source_20261010T090000Z",
+      tomorrowMorning,
+      timed("2026-10-10T14:00:00Z", "2026-10-10T15:00:00Z"),
+    );
+
+    const notYetMoved = occurrence("target_20261010T090000Z", tomorrowMorning);
+
+    expect(planCopies({ rule, sourceEvents: [moved], targetEvents: [notYetMoved], now })).toEqual(
+      [],
+    );
   });
 
   test("updates a running Copy whose Source Event moved into the past", () => {

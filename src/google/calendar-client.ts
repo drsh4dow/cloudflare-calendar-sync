@@ -6,7 +6,10 @@ import {
   type CalendarEvent,
   type Copy,
   type EventDetails,
+  type EventStart,
   type EventTime,
+  eventTypes,
+  responseStatuses,
   type SyncWindow,
   visibilities,
 } from "./calendar-event";
@@ -75,6 +78,9 @@ const CancelledEvent = Schema.Struct({ id: Schema.String, status: Schema.Literal
 
 const LiveEvent = Schema.Struct({
   id: Schema.String,
+  iCalUID: Schema.String,
+  originalStartTime: Schema.optionalKey(EventTimeBound),
+  eventType: Schema.Literals(eventTypes),
   status: Schema.optionalKey(Schema.Literals(["confirmed", "tentative"])),
   summary: Schema.optionalKey(Schema.String),
   description: Schema.optionalKey(Schema.String),
@@ -89,7 +95,15 @@ const LiveEvent = Schema.Struct({
       overrides: Schema.optionalKey(Schema.Array(Schema.Struct({}))),
     }),
   ),
-  attendees: Schema.optionalKey(Schema.Array(Schema.Struct({}))),
+  attendees: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        // Marks the entry that stands for the Calendar being listed.
+        self: Schema.optionalKey(Schema.Boolean),
+        responseStatus: Schema.Literals(responseStatuses),
+      }),
+    ),
+  ),
   extendedProperties: Schema.optionalKey(
     Schema.Struct({
       private: Schema.optionalKey(
@@ -392,6 +406,21 @@ function calendarEventOf(
     );
   }
 
+  let originalStart: EventStart | undefined;
+
+  if (event.originalStartTime !== undefined) {
+    originalStart = eventStartOf(event.originalStartTime);
+
+    if (originalStart === undefined) {
+      return Effect.fail(
+        new GoogleCalendarUnavailable({
+          calendarAccountId,
+          cause: `Event ${event.id} has an original start without a time or date`,
+        }),
+      );
+    }
+  }
+
   const details: Types.Mutable<EventDetails> = {
     time,
     visibility: event.visibility ?? "default",
@@ -411,13 +440,26 @@ function calendarEventOf(
   }
 
   const overrides = event.reminders?.overrides ?? [];
+  const attendees = event.attendees ?? [];
 
   const calendarEvent: Types.Mutable<CalendarEvent> = {
     id: event.id,
+    iCalUID: event.iCalUID,
+    eventType: event.eventType,
     details,
     hasReminders: event.reminders?.useDefault === true || overrides.length > 0,
-    hasAttendees: (event.attendees ?? []).length > 0,
+    hasAttendees: attendees.length > 0,
   };
+
+  if (originalStart !== undefined) {
+    calendarEvent.originalStart = originalStart;
+  }
+
+  const ownerResponse = attendees.find((attendee) => attendee.self === true)?.responseStatus;
+
+  if (ownerResponse !== undefined) {
+    calendarEvent.ownerResponse = ownerResponse;
+  }
 
   const syncRuleId = event.extendedProperties?.private?.[syncRuleIdTag];
 
@@ -426,6 +468,18 @@ function calendarEventOf(
   }
 
   return Effect.succeed(calendarEvent);
+}
+
+function eventStartOf(bound: EventTimeBound): EventStart | undefined {
+  if (bound.dateTime !== undefined) {
+    return { kind: "timed", start: bound.dateTime };
+  }
+
+  if (bound.date !== undefined) {
+    return { kind: "allDay", startDate: bound.date };
+  }
+
+  return undefined;
 }
 
 function eventTimeOf(start: EventTimeBound, end: EventTimeBound): EventTime | undefined {

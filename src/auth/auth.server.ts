@@ -7,9 +7,10 @@ import { admitOnlyOwner, normalizeOwnerEmail } from "./owner-admission";
 
 /**
  * better-auth for one origin this Worker serves. The origin sets the Google
- * redirect URI and whether cookies are Secure.
+ * redirect URI and whether cookies are Secure. Without one, better-auth logs
+ * a warning and can still refresh access tokens, but not sign in or link.
  */
-export function createAuth(env: WorkerEnv, origin: string) {
+export function createAuth(env: WorkerEnv, origin: string | undefined) {
   return betterAuth({
     baseURL: origin,
     secret: env.BETTER_AUTH_SECRET,

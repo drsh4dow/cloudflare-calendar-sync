@@ -2,12 +2,13 @@ import { createStartHandler, defaultStreamHandler } from "@tanstack/react-start/
 
 import type { WorkerEnv } from "../alchemy.run";
 import { createAuth, type Auth } from "./auth/auth.server";
+import { effectRunner, type RunEffect } from "./effect-runner.server";
 
 // Augments the module the generated route tree registers the router on;
 // augmenting `@tanstack/react-router` instead leaves the context untyped.
 declare module "@tanstack/react-start" {
   interface Register {
-    server: { requestContext: { auth: Auth } };
+    server: { requestContext: { auth: Auth; runEffect: RunEffect } };
   }
 }
 
@@ -23,7 +24,7 @@ export default {
     // settles and every later auth call in the isolate hangs.
     const auth = createAuth(env, new URL(request.url).origin);
 
-    return handleStartRequest(request, { context: { auth } });
+    return handleStartRequest(request, { context: { auth, runEffect: effectRunner(env) } });
   },
 
   async scheduled(controller) {

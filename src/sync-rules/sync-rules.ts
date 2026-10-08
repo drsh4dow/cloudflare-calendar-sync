@@ -9,6 +9,7 @@ import {
 } from "@/auth/calendar-accounts.server";
 import { requireOwnerSession } from "@/auth/session.server";
 import { type Calendar, isReadable, isWritable } from "@/google/calendar";
+import { deleteSyncRuleWithCopies } from "@/runs/cleanup";
 import { NewSyncRule, reverseOf, type SyncRule, SyncRuleSettings } from "./sync-rule";
 import { SyncRules } from "./sync-rules.server";
 
@@ -82,11 +83,15 @@ export const updateSyncRule = createServerFn({ method: "POST" })
     await context.runEffect(SyncRules.use((syncRules) => syncRules.update(data.id, data.settings)));
   });
 
+/**
+ * Deletes a Sync Rule and its Copies that haven't ended. When a Copy can't be
+ * deleted, the Sync Rule stays, and deleting it again finishes the cleanup.
+ */
 export const deleteSyncRule = createServerFn({ method: "POST" })
   .validator(Schema.toStandardSchemaV1(Schema.Struct({ id: Schema.String })))
   .handler(async ({ context, data }): Promise<void> => {
     await requireOwnerSession(context.auth, getRequestHeaders());
-    await context.runEffect(SyncRules.use((syncRules) => syncRules.delete(data.id)));
+    await context.runEffect(deleteSyncRuleWithCopies(data.id));
   });
 
 /** The Calendar as its Calendar Account lists it, when the listing succeeded and has it. */

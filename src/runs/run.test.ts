@@ -1,10 +1,12 @@
 import { DateTime, Effect, Layer } from "effect";
+import { TestClock } from "effect/testing";
 import { describe, expect, test } from "vite-plus/test";
 
 import type { CalendarEvent, EventTime } from "@/google/calendar-event";
 import { type FakeGoogleCalendar, makeFakeGoogleCalendar } from "@/google/fake-google-calendar";
 import type { SyncRule } from "@/sync-rules/sync-rule";
 import { SyncRules } from "@/sync-rules/sync-rules.server";
+import { deleteCopiesInOtherAccounts, deleteSyncRuleWithCopies } from "./cleanup";
 import { run, RunFailed } from "./run";
 import { type RunReport, RunStatusStore } from "./run-status.server";
 
@@ -38,6 +40,15 @@ const freelanceToWork: SyncRule = {
   sourceCalendarId: freelanceCalendar,
 };
 
+const workToPersonal: SyncRule = {
+  ...personalToWork,
+  id: "abcdef0123456789abcdef0123456789",
+  sourceCalendarAccountId: work,
+  sourceCalendarId: workCalendar,
+  targetCalendarAccountId: personal,
+  targetCalendarId: personalCalendar,
+};
+
 function newGoogleCalendar(): FakeGoogleCalendar {
   return makeFakeGoogleCalendar([
     { calendarAccountId: personal, calendarId: personalCalendar, accessRole: "owner" },
@@ -46,17 +57,30 @@ function newGoogleCalendar(): FakeGoogleCalendar {
   ]);
 }
 
+type StoredSyncRules = {
+  readonly layer: Layer.Layer<SyncRules>;
+  /** The Sync Rules that weren't deleted. */
+  rules(): ReadonlyArray<SyncRule>;
+};
+
 /** Sync Rules kept in memory, standing in for D1. */
-function syncRulesLayer(rules: ReadonlyArray<SyncRule>) {
-  return Layer.succeed(
+function storeSyncRules(initial: ReadonlyArray<SyncRule>): StoredSyncRules {
+  let rules = initial;
+
+  const layer = Layer.succeed(
     SyncRules,
     SyncRules.of({
-      list: Effect.succeed(rules),
-      create: () => Effect.die("Runs don't create Sync Rules"),
-      update: () => Effect.die("Runs don't update Sync Rules"),
-      delete: () => Effect.die("Runs don't delete Sync Rules"),
+      list: Effect.sync(() => rules),
+      create: () => Effect.die("Runs and cleanup don't create Sync Rules"),
+      update: () => Effect.die("Runs and cleanup don't update Sync Rules"),
+      delete: (id) =>
+        Effect.sync(() => {
+          rules = rules.filter((rule) => rule.id !== id);
+        }),
     }),
   );
+
+  return { layer, rules: () => rules };
 }
 
 /** Run status that keeps each Run's report in `reports`, standing in for D1. */
@@ -79,7 +103,9 @@ function runAgainst(
   reports: Array<RunReport> = [],
 ) {
   return run.pipe(
-    Effect.provide(Layer.mergeAll(google.layer, syncRulesLayer(rules), runStatusLayer(reports))),
+    Effect.provide(
+      Layer.mergeAll(google.layer, storeSyncRules(rules).layer, runStatusLayer(reports)),
+    ),
   );
 }
 
@@ -246,5 +272,99 @@ describe("run", () => {
     expect(reports[0]?.calendarAccounts).toEqual([
       { calendarAccountId: freelance, problem: "unavailable" },
     ]);
+  });
+});
+
+/** A Private Mode Copy that `personalToWork` writes, as Google lists it. */
+function copyInWork(time: EventTime) {
+  return expect.objectContaining({
+    syncRuleId: personalToWork.id,
+    details: { title: "Busy", time, visibility: "private", busy: true },
+  });
+}
+
+describe("deleting a Sync Rule", () => {
+  test("deletes its Copies that haven't ended, and no other event", async () => {
+    const google = newGoogleCalendar();
+    const syncRules = storeSyncRules([personalToWork]);
+    const standup = meeting("standup", tomorrowAt(11));
+
+    const anotherRulesCopy: CalendarEvent = {
+      ...meeting("another-rules-copy", tomorrowAt(13)),
+      syncRuleId: "00000000000000000000000000000000",
+    };
+
+    google.putEvent(personalCalendar, meeting("breakfast", tomorrowAt(8)));
+    google.putEvent(personalCalendar, meeting("lunch", tomorrowAt(12)));
+    google.putEvent(workCalendar, standup);
+    google.putEvent(workCalendar, anotherRulesCopy);
+
+    const tenTomorrow = DateTime.makeUnsafe(Date.now()).pipe(
+      DateTime.startOf("day"),
+      DateTime.add({ days: 1, hours: 10 }),
+    );
+
+    const program = Effect.gen(function* () {
+      yield* TestClock.setTime(Date.now());
+      yield* run;
+      // Breakfast has ended by ten tomorrow; lunch hasn't.
+      yield* TestClock.setTime(DateTime.toEpochMillis(tenTomorrow));
+      yield* deleteSyncRuleWithCopies(personalToWork.id);
+    });
+
+    const services = Layer.mergeAll(
+      google.layer,
+      syncRules.layer,
+      runStatusLayer([]),
+      TestClock.layer(),
+    );
+
+    await Effect.runPromise(program.pipe(Effect.provide(services)));
+
+    expect(google.events(workCalendar)).toEqual([
+      standup,
+      anotherRulesCopy,
+      copyInWork(tomorrowAt(8)),
+    ]);
+    expect(syncRules.rules()).toEqual([]);
+  });
+
+  test("keeps the Sync Rule when its Target Calendar can't be read, so deleting again can finish", async () => {
+    const google = newGoogleCalendar();
+    const syncRules = storeSyncRules([personalToWork]);
+    const services = Layer.mergeAll(google.layer, syncRules.layer, runStatusLayer([]));
+
+    google.putEvent(personalCalendar, meeting("meeting1", tomorrowAt(9)));
+    await Effect.runPromise(run.pipe(Effect.provide(services)));
+    google.failReads(workCalendar);
+
+    await Effect.runPromiseExit(
+      deleteSyncRuleWithCopies(personalToWork.id).pipe(Effect.provide(services)),
+    );
+
+    expect(syncRules.rules()).toEqual([personalToWork]);
+    expect(google.events(workCalendar)).toEqual([copyInWork(tomorrowAt(9))]);
+  });
+});
+
+describe("disconnecting a Calendar Account", () => {
+  test("starts by deleting the Copies its Calendars produced in other accounts, leaving those inside it", async () => {
+    const google = newGoogleCalendar();
+    const syncRules = storeSyncRules([personalToWork, workToPersonal]);
+    const services = Layer.mergeAll(google.layer, syncRules.layer, runStatusLayer([]));
+    const dentist = meeting("dentist", tomorrowAt(9));
+    const standup = meeting("standup", tomorrowAt(11));
+
+    google.putEvent(personalCalendar, dentist);
+    google.putEvent(workCalendar, standup);
+    await Effect.runPromise(run.pipe(Effect.provide(services)));
+    await Effect.runPromise(deleteCopiesInOtherAccounts(personal).pipe(Effect.provide(services)));
+
+    expect(google.events(workCalendar)).toEqual([standup]);
+    expect(google.events(personalCalendar)).toEqual([
+      dentist,
+      expect.objectContaining({ syncRuleId: workToPersonal.id }),
+    ]);
+    expect(syncRules.rules()).toEqual([workToPersonal]);
   });
 });

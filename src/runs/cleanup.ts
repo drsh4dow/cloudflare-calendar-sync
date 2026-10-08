@@ -1,0 +1,79 @@
+import { DateTime, Effect } from "effect";
+
+import { GoogleCalendar } from "@/google/calendar-client";
+import type { SyncRule } from "@/sync-rules/sync-rule";
+import { SyncRules } from "@/sync-rules/sync-rules.server";
+import { planCopies, syncWindowAt } from "./planner";
+import { applyCopyOperation, type CalendarRef } from "./run";
+
+/**
+ * Deletes the Sync Rule's Copies that haven't ended, then the Sync Rule. A
+ * Sync Rule that no longer exists counts as deleted, so a repeated request is
+ * harmless.
+ */
+export const deleteSyncRuleWithCopies = Effect.fn("deleteSyncRuleWithCopies")(function* (
+  syncRuleId: string,
+) {
+  const syncRules = yield* SyncRules;
+  const rules = yield* syncRules.list;
+  const rule = rules.find((candidate) => candidate.id === syncRuleId);
+
+  if (rule !== undefined) {
+    yield* deleteWithCopies(rule);
+  }
+});
+
+/**
+ * Deletes the Copies that the Calendar Account's Calendars produced in other
+ * Calendar Accounts' Calendars, with the Sync Rules that produced them. It
+ * uses only the other accounts' tokens, so it works when this account's grant
+ * is gone. Copies inside the Calendar Account stay where they are.
+ */
+export const deleteCopiesInOtherAccounts = Effect.fn("deleteCopiesInOtherAccounts")(function* (
+  calendarAccountId: string,
+) {
+  const syncRules = yield* SyncRules;
+  const rules = yield* syncRules.list;
+
+  const intoOtherAccounts = rules.filter(
+    (rule) =>
+      rule.sourceCalendarAccountId === calendarAccountId &&
+      rule.targetCalendarAccountId !== calendarAccountId,
+  );
+
+  yield* Effect.forEach(intoOtherAccounts, deleteWithCopies, { discard: true });
+});
+
+/**
+ * The Sync Rule is deleted only after all its Copies are. When one can't be
+ * deleted, the Sync Rule stays and Runs keep maintaining its Copies, so
+ * deleting again finishes the job instead of leaving Copies no Sync Rule
+ * claims.
+ */
+const deleteWithCopies = Effect.fn("deleteWithCopies")(function* (rule: SyncRule) {
+  const syncRules = yield* SyncRules;
+  const google = yield* GoogleCalendar;
+  const now = yield* DateTime.now;
+
+  const target: CalendarRef = {
+    calendarAccountId: rule.targetCalendarAccountId,
+    calendarId: rule.targetCalendarId,
+  };
+
+  const targetEvents = yield* google.listEvents(
+    target.calendarAccountId,
+    target.calendarId,
+    syncWindowAt(now),
+  );
+
+  // Without Source Events, every Copy of the rule that hasn't ended is stale.
+  const operations = planCopies({ rule, sourceEvents: [], targetEvents, now });
+
+  yield* Effect.forEach(operations, (operation) => applyCopyOperation(target, operation), {
+    concurrency: 4,
+    discard: true,
+  });
+
+  yield* syncRules.delete(rule.id);
+  yield* Effect.logInfo("Sync Rule deleted", { syncRuleId: rule.id, writes: operations.length });
+});

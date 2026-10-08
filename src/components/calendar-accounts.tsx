@@ -202,8 +202,10 @@ function DisconnectButton({ email, disabled, onConfirm }: DisconnectButtonProps)
         <AlertDialogHeader>
           <AlertDialogTitle>Disconnect {email}?</AlertDialogTitle>
           <AlertDialogDescription>
-            Calendar Sync stops using this account and deletes its stored tokens. The account's
-            calendars in Google stay as they are.
+            Calendar Sync deletes the Copies of this account's events that haven't ended from your
+            other accounts' calendars, then the Sync Rules that use this account, then its stored
+            tokens. Copies already in this account's calendars stay there; delete them yourself in
+            Google Calendar.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

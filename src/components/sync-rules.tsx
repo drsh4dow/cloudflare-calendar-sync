@@ -253,7 +253,7 @@ function DeleteSyncRuleButton({ rule, source, target }: SyncRuleActionProps) {
             <AlertDialogTitle>Delete this Sync Rule?</AlertDialogTitle>
             <AlertDialogDescription>
               Calendar Sync stops copying events from {describeCalendar(source)} into{" "}
-              {describeCalendar(target)}.
+              {describeCalendar(target)} and deletes the Copies there that haven't ended.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

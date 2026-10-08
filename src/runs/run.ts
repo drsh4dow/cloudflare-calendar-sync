@@ -12,7 +12,7 @@ import type { CalendarAccountProblem } from "./run-status";
 import { type RunReport, RunStatusStore } from "./run-status.server";
 
 /** A Calendar as one Calendar Account reaches it. */
-type CalendarRef = { readonly calendarAccountId: string; readonly calendarId: string };
+export type CalendarRef = { readonly calendarAccountId: string; readonly calendarId: string };
 
 /** How applying one Sync Rule ended. */
 type SyncRuleOutcome =
@@ -60,33 +60,6 @@ export const run = Effect.gen(function* () {
     capacity: 2 * rules.length,
   });
 
-  const apply = (target: CalendarRef, operation: CopyOperation) => {
-    const { calendarAccountId, calendarId } = target;
-
-    switch (operation.kind) {
-      case "create":
-        // The id may be taken by this Copy after the Owner deleted it, or
-        // after an overlapping Run inserted it. Either way, writing the whole
-        // Copy under the id makes it current (ADR 0002).
-        return google
-          .insertCopy(calendarAccountId, calendarId, operation.copy)
-          .pipe(
-            Effect.catchTag("CopyIdTaken", () =>
-              google.updateCopy(calendarAccountId, calendarId, operation.copy),
-            ),
-          );
-      case "update":
-        return google.updateCopy(calendarAccountId, calendarId, operation.copy);
-      case "delete":
-        return google.deleteCopy(calendarAccountId, calendarId, operation.copyId);
-      default: {
-        const exhaustive: never = operation;
-
-        return exhaustive;
-      }
-    }
-  };
-
   const syncRule = Effect.fn("syncRule")(function* (rule: SyncRule) {
     const target: CalendarRef = {
       calendarAccountId: rule.targetCalendarAccountId,
@@ -103,7 +76,7 @@ export const run = Effect.gen(function* () {
     const targetEvents = yield* Cache.get(listings, target);
     const operations = planCopies({ rule, sourceEvents, targetEvents, now });
 
-    yield* Effect.forEach(operations, (operation) => apply(target, operation), {
+    yield* Effect.forEach(operations, (operation) => applyCopyOperation(target, operation), {
       concurrency: 4,
       discard: true,
     });
@@ -144,6 +117,36 @@ export const run = Effect.gen(function* () {
     yield* new RunFailed({ failedSyncRules });
   }
 });
+
+/** Writes one planned operation to the Target Calendar. */
+export function applyCopyOperation(target: CalendarRef, operation: CopyOperation) {
+  const { calendarAccountId, calendarId } = target;
+
+  return GoogleCalendar.use((google) => {
+    switch (operation.kind) {
+      case "create":
+        // The id may be taken by this Copy after the Owner deleted it, or
+        // after an overlapping Run inserted it. Either way, writing the whole
+        // Copy under the id makes it current (ADR 0002).
+        return google
+          .insertCopy(calendarAccountId, calendarId, operation.copy)
+          .pipe(
+            Effect.catchTag("CopyIdTaken", () =>
+              google.updateCopy(calendarAccountId, calendarId, operation.copy),
+            ),
+          );
+      case "update":
+        return google.updateCopy(calendarAccountId, calendarId, operation.copy);
+      case "delete":
+        return google.deleteCopy(calendarAccountId, calendarId, operation.copyId);
+      default: {
+        const exhaustive: never = operation;
+
+        return exhaustive;
+      }
+    }
+  });
+}
 
 function calendarAccountFailed(
   rule: SyncRule,

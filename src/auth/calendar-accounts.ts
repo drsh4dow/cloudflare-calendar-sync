@@ -3,6 +3,7 @@ import { getRequestHeaders } from "@tanstack/react-start/server";
 import { APIError } from "better-auth/api";
 import { Schema } from "effect";
 
+import { deleteCopiesInOtherAccounts } from "@/runs/cleanup";
 import {
   type ListedCalendarAccount,
   listCalendars,
@@ -24,9 +25,15 @@ export const listCalendarAccounts = createServerFn({ method: "GET" }).handler(
 export type DisconnectOutcome = "disconnected" | "signInAgain";
 
 /**
- * Removes a Calendar Account with its tokens. better-auth accepts this only
- * from a session signed in within the last day; an older one gets
- * `signInAgain`.
+ * Removes a Calendar Account with its tokens and the Sync Rules that read or
+ * write through it. First it deletes the Copies the account's Calendars
+ * produced in other accounts, since removing the Sync Rules loses track of
+ * them; Copies inside the account stay. When that cleanup fails, the account
+ * stays connected and retrying continues it.
+ *
+ * better-auth removes the account only for a session signed in within the
+ * last day. An older session gets `signInAgain` after the cleanup has run,
+ * and the retry finds nothing left to clean up.
  */
 export const disconnectCalendarAccount = createServerFn({ method: "POST" })
   .validator(Schema.toStandardSchemaV1(Schema.Struct({ calendarAccountId: Schema.String })))
@@ -38,6 +45,8 @@ export const disconnectCalendarAccount = createServerFn({ method: "POST" })
     if (signInAccount?.id === data.calendarAccountId) {
       throw new Error("The Owner's sign-in account can't be disconnected.");
     }
+
+    await context.runEffect(deleteCopiesInOtherAccounts(data.calendarAccountId));
 
     try {
       await context.auth.api.unlinkAccount({

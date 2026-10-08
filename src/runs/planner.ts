@@ -1,9 +1,10 @@
-import { DateTime, Equal } from "effect";
+import { DateTime, Equal, type Types } from "effect";
 import { Hex } from "effect/encoding";
 
 import type {
   CalendarEvent,
   Copy,
+  CopyDetails,
   EventDetails,
   EventTime,
   SyncWindow,
@@ -71,7 +72,7 @@ export function planCopies({
   const operations: Array<CopyOperation> = [];
 
   for (const event of sourceEvents) {
-    if (!shouldCopy(event) || meetingsInTarget.has(meetingOccurrence(event))) {
+    if (!shouldCopy(rule, event) || meetingsInTarget.has(meetingOccurrence(event))) {
       continue;
     }
 
@@ -98,11 +99,16 @@ export function planCopies({
 
 /**
  * Whether a Run copies the event. Only Source Events are copied, so Copies
- * never chain, and only timed ones. Events marked free, events the Owner
- * declined, and working-location events don't block time.
+ * never chain, and all-day ones only when the rule includes them. Events
+ * marked free, events the Owner declined, and working-location events don't
+ * block time.
  */
-function shouldCopy(event: CalendarEvent): boolean {
-  if (event.syncRuleId !== undefined || event.details.time.kind !== "timed") {
+function shouldCopy(rule: SyncRule, event: CalendarEvent): boolean {
+  if (event.syncRuleId !== undefined) {
+    return false;
+  }
+
+  if (event.details.time.kind === "allDay" && !rule.includeAllDayEvents) {
     return false;
   }
 
@@ -166,14 +172,12 @@ function copyOf(rule: SyncRule, event: CalendarEvent): Copy {
 }
 
 /** What the Copy of a Source Event shows under the rule's Mode. */
-function copyDetails(rule: SyncRule, source: EventDetails): EventDetails {
+function copyDetails(rule: SyncRule, source: EventDetails): CopyDetails {
   switch (rule.mode) {
     case "private":
       return privateDetails(rule.privateTitle, source.time);
     case "transparent":
-      // There is no Transparent Mode projection yet, so these Copies reveal
-      // only what Private Mode does.
-      return privateDetails(rule.privateTitle, source.time);
+      return transparentDetails(source);
     default: {
       const exhaustive: never = rule.mode;
 
@@ -182,8 +186,61 @@ function copyDetails(rule: SyncRule, source: EventDetails): EventDetails {
   }
 }
 
-function privateDetails(title: string, time: EventTime): EventDetails {
+function privateDetails(title: string, time: EventTime): CopyDetails {
   return { title, time, visibility: "private", busy: true };
+}
+
+/**
+ * The Source Event's title, description, location, conference link, and time.
+ * The Copy keeps the Source Event's visibility, so a private event stays
+ * private.
+ */
+function transparentDetails(source: EventDetails): CopyDetails {
+  const details: Types.Mutable<CopyDetails> = {
+    time: source.time,
+    visibility: source.visibility,
+    busy: true,
+  };
+
+  if (source.title !== undefined) {
+    details.title = source.title;
+  }
+
+  const description = withConferenceLink(source.description, source.conferenceLink);
+
+  if (description !== undefined) {
+    details.description = description;
+  }
+
+  if (source.location !== undefined) {
+    details.location = source.location;
+  }
+
+  return details;
+}
+
+/**
+ * The description with the conference link at its end, unless it already
+ * shows the link. As text, the link lists back exactly as written, which
+ * conference data Google fills in on its own wouldn't.
+ */
+function withConferenceLink(
+  description: string | undefined,
+  conferenceLink: string | undefined,
+): string | undefined {
+  if (conferenceLink === undefined) {
+    return description;
+  }
+
+  if (description === undefined) {
+    return conferenceLink;
+  }
+
+  if (description.includes(conferenceLink)) {
+    return description;
+  }
+
+  return `${description}\n\n${conferenceLink}`;
 }
 
 /**

@@ -23,6 +23,8 @@ export type EventDetails = {
   readonly title?: string;
   readonly description?: string;
   readonly location?: string;
+  /** The link for joining the event's video conference, such as a Google Meet link. */
+  readonly conferenceLink?: string;
   readonly time: EventTime;
   readonly visibility: Visibility;
   /** Whether the event blocks time, which Google calls `opaque` transparency. */
@@ -76,12 +78,18 @@ export type CalendarEvent = {
   readonly hasAttendees: boolean;
 };
 
+/**
+ * What a Copy shows. A Copy never has a conference of its own, so writing it
+ * can't create one; Transparent Mode shows the link in the description.
+ */
+export type CopyDetails = Omit<EventDetails, "conferenceLink">;
+
 /** A Copy as a Run writes it, which is always without reminders and attendees. */
 export type Copy = {
   readonly id: string;
   readonly syncRuleId: string;
   readonly sourceEventId: string;
-  readonly details: EventDetails;
+  readonly details: CopyDetails;
 };
 
 /** The span in which Runs maintain Copies. */

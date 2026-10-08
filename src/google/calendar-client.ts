@@ -85,6 +85,15 @@ const LiveEvent = Schema.Struct({
   summary: Schema.optionalKey(Schema.String),
   description: Schema.optionalKey(Schema.String),
   location: Schema.optionalKey(Schema.String),
+  /** The Google Meet link, which Google derives from the conference data. */
+  hangoutLink: Schema.optionalKey(Schema.String),
+  conferenceData: Schema.optionalKey(
+    Schema.Struct({
+      entryPoints: Schema.optionalKey(
+        Schema.Array(Schema.Struct({ entryPointType: Schema.String, uri: Schema.String })),
+      ),
+    }),
+  ),
   start: EventTimeBound,
   end: EventTimeBound,
   visibility: Schema.optionalKey(Schema.Literals(visibilities)),
@@ -280,7 +289,7 @@ export class GoogleCalendar extends Context.Service<
 
         const request = HttpClientRequest.post(eventsUrl(calendarId)).pipe(
           HttpClientRequest.bearerToken(accessToken),
-          HttpClientRequest.setUrlParams({ sendUpdates: "none" }),
+          HttpClientRequest.setUrlParams(copyWriteParams),
           HttpClientRequest.bodyJsonUnsafe(eventBody(copy)),
         );
 
@@ -303,7 +312,7 @@ export class GoogleCalendar extends Context.Service<
 
         const request = HttpClientRequest.put(eventUrl(calendarId, copy.id)).pipe(
           HttpClientRequest.bearerToken(accessToken),
-          HttpClientRequest.setUrlParams({ sendUpdates: "none" }),
+          HttpClientRequest.setUrlParams(copyWriteParams),
           HttpClientRequest.bodyJsonUnsafe(eventBody(copy)),
         );
 
@@ -341,6 +350,13 @@ export class GoogleCalendar extends Context.Service<
     }),
   ).pipe(Layer.provide(FetchHttpClient.layer));
 }
+
+/**
+ * Writes notify nobody. With `conferenceDataVersion=1`, Google reads a body
+ * without conference data as having none, so an update removes a conference
+ * added to a Copy by hand. The body never asks for a new conference.
+ */
+const copyWriteParams = { sendUpdates: "none", conferenceDataVersion: 1 };
 
 function eventsUrl(calendarId: string): string {
   return `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
@@ -437,6 +453,16 @@ function calendarEventOf(
 
   if (event.location !== undefined) {
     details.location = event.location;
+  }
+
+  const videoEntryPoint = event.conferenceData?.entryPoints?.find(
+    (entryPoint) => entryPoint.entryPointType === "video",
+  );
+
+  const conferenceLink = videoEntryPoint?.uri ?? event.hangoutLink;
+
+  if (conferenceLink !== undefined) {
+    details.conferenceLink = conferenceLink;
   }
 
   const overrides = event.reminders?.overrides ?? [];

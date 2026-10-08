@@ -41,6 +41,7 @@ const config = defineConfig({
       { name: "vite-plus", specifier: "vite-plus/oxlint-plugin" },
       { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },
       { name: "anti-slop-effect", specifier: "./tools/oxlint/anti-slop/effect/index.ts" },
+      { name: "shadcn", specifier: "@shadcn/lint" },
     ],
     rules: {
       "vite-plus/prefer-vite-plus-imports": "error",
@@ -68,9 +69,23 @@ const config = defineConfig({
       "anti-slop-effect/no-manual-tagged-construction": "error",
       "anti-slop-effect/no-service-constructor-imports": "error",
       "anti-slop-effect/prefer-effect-match": "error",
+      "shadcn/no-restyle": "error",
+      "shadcn/no-raw-colors": "error",
+      "shadcn/no-arbitrary-values": "error",
+      "shadcn/no-inline-styles": "error",
+      "shadcn/no-unknown-classes": "error",
+      "shadcn/require-static-classes": "error",
       // The automatic JSX runtime (tsconfig `jsx: react-jsx`) needs no React in scope.
       "react/react-in-jsx-scope": "off",
     },
+    overrides: [
+      {
+        // Components vendored by the shadcn CLI. Turn off only the shadcn
+        // rules that fire on their upstream source.
+        files: ["src/components/ui/**"],
+        rules: { "shadcn/no-arbitrary-values": "off" },
+      },
+    ],
     options: { typeAware: true, typeCheck: true },
   },
   test: {

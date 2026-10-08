@@ -1,0 +1,176 @@
+import { DateTime, Equal } from "effect";
+import { Hex } from "effect/encoding";
+
+import type {
+  CalendarEvent,
+  Copy,
+  EventDetails,
+  EventTime,
+  SyncWindow,
+} from "@/google/calendar-event";
+import type { SyncRule } from "@/sync-rules/sync-rule";
+
+/**
+ * From the start of today to 60 days later, with days in UTC. Copies that
+ * have ended are never touched, so the start only bounds what a Run reads.
+ */
+export function syncWindowAt(now: DateTime.Utc): SyncWindow {
+  const start = DateTime.startOf(now, "day");
+
+  return { start, end: DateTime.add(start, { days: 60 }) };
+}
+
+/** A write that brings one Copy in line with its Source Event. */
+export type CopyOperation =
+  | { readonly kind: "create"; readonly copy: Copy }
+  | { readonly kind: "update"; readonly copy: Copy }
+  | { readonly kind: "delete"; readonly copyId: string };
+
+export type PlanInput = {
+  readonly rule: SyncRule;
+  /** Every event a complete read of the Source Calendar returned. */
+  readonly sourceEvents: ReadonlyArray<CalendarEvent>;
+  /** Every event a complete read of the Target Calendar returned. */
+  readonly targetEvents: ReadonlyArray<CalendarEvent>;
+  readonly now: DateTime.Utc;
+};
+
+/**
+ * The writes that bring a Sync Rule's Copies in line with its Source Events.
+ * Events without the rule's tag are never written, and Copies that have ended
+ * are left as they are. A Copy whose Source Event the listing lacks is
+ * deleted, so the listings must be complete.
+ */
+export function planCopies({
+  rule,
+  sourceEvents,
+  targetEvents,
+  now,
+}: PlanInput): ReadonlyArray<CopyOperation> {
+  const unclaimedCopies = new Map<string, CalendarEvent>();
+
+  for (const event of targetEvents) {
+    if (event.syncRuleId === rule.id) {
+      unclaimedCopies.set(event.id, event);
+    }
+  }
+
+  const operations: Array<CopyOperation> = [];
+
+  for (const event of sourceEvents) {
+    if (!shouldCopy(event)) {
+      continue;
+    }
+
+    const copy = copyOf(rule, event);
+    const existing = unclaimedCopies.get(copy.id);
+
+    unclaimedCopies.delete(copy.id);
+
+    const operation = reconcile(copy, existing, now);
+
+    if (operation !== undefined) {
+      operations.push(operation);
+    }
+  }
+
+  for (const stale of unclaimedCopies.values()) {
+    if (!hasEnded(stale.details.time, now)) {
+      operations.push({ kind: "delete", copyId: stale.id });
+    }
+  }
+
+  return operations;
+}
+
+/**
+ * Whether a Run copies the event. Only Source Events are copied, so Copies
+ * never chain, and only timed ones.
+ */
+function shouldCopy(event: CalendarEvent): boolean {
+  return event.syncRuleId === undefined && event.details.time.kind === "timed";
+}
+
+/** The write that makes the Target Calendar show the Copy, if any. */
+function reconcile(
+  copy: Copy,
+  existing: CalendarEvent | undefined,
+  now: DateTime.Utc,
+): CopyOperation | undefined {
+  if (existing === undefined) {
+    if (hasEnded(copy.details.time, now)) {
+      return undefined;
+    }
+
+    return { kind: "create", copy };
+  }
+
+  if (hasEnded(existing.details.time, now) || shows(existing, copy)) {
+    return undefined;
+  }
+
+  return { kind: "update", copy };
+}
+
+/** Whether the listed event shows exactly what the Copy should, which a manual edit breaks. */
+function shows(event: CalendarEvent, copy: Copy): boolean {
+  return !event.hasReminders && !event.hasAttendees && Equal.equals(event.details, copy.details);
+}
+
+function copyOf(rule: SyncRule, event: CalendarEvent): Copy {
+  return {
+    id: copyId(rule.id, event.id),
+    syncRuleId: rule.id,
+    sourceEventId: event.id,
+    details: copyDetails(rule, event.details),
+  };
+}
+
+/** What the Copy of a Source Event shows under the rule's Mode. */
+function copyDetails(rule: SyncRule, source: EventDetails): EventDetails {
+  switch (rule.mode) {
+    case "private":
+      return privateDetails(rule.privateTitle, source.time);
+    case "transparent":
+      // There is no Transparent Mode projection yet, so these Copies reveal
+      // only what Private Mode does.
+      return privateDetails(rule.privateTitle, source.time);
+    default: {
+      const exhaustive: never = rule.mode;
+
+      return exhaustive;
+    }
+  }
+}
+
+function privateDetails(title: string, time: EventTime): EventDetails {
+  return { title, time, visibility: "private", busy: true };
+}
+
+/**
+ * Whether the event is over. All-day dates are compared with today's date in
+ * UTC, the time zone of the Sync Window.
+ */
+function hasEnded(time: EventTime, now: DateTime.Utc): boolean {
+  switch (time.kind) {
+    case "timed":
+      return DateTime.isLessThanOrEqualTo(time.end, now);
+    case "allDay":
+      return time.endDate <= DateTime.formatIsoDate(now);
+    default: {
+      const exhaustive: never = time;
+
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * The Copy's Google event id (ADR 0002). Sync Rule ids are hex, and hex is a
+ * subset of the alphabet Google allows in event ids (lowercase a to v and
+ * digits), so the id is the Sync Rule id followed by the hex of the source
+ * event id.
+ */
+function copyId(syncRuleId: string, sourceEventId: string): string {
+  return syncRuleId + Hex.encode(sourceEventId);
+}

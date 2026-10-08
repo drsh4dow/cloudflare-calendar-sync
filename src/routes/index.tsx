@@ -2,6 +2,7 @@ import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { CalendarAccounts } from "@/components/calendar-accounts";
+import { RunsSection } from "@/components/runs";
 import { SyncRulesSection } from "@/components/sync-rules";
 import { Button } from "@/components/ui/button";
 import { listCalendarAccounts } from "@/auth/calendar-accounts";
@@ -76,6 +77,7 @@ function Dashboard() {
       <main className="mx-auto flex max-w-4xl flex-col gap-10 p-6">
         <CalendarAccounts accounts={accounts} linkFailed={search.error === "linkFailed"} />
         <SyncRulesSection rules={rules} accounts={accounts} />
+        <RunsSection />
       </main>
     </div>
   );

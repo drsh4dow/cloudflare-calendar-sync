@@ -3,6 +3,7 @@ import { createStartHandler, defaultStreamHandler } from "@tanstack/react-start/
 import type { WorkerEnv } from "../alchemy.run";
 import { createAuth, type Auth } from "./auth/auth.server";
 import { effectRunner, type RunEffect } from "./effect-runner.server";
+import { run } from "./runs/run";
 
 // Augments the module the generated route tree registers the router on;
 // augmenting `@tanstack/react-router` instead leaves the context untyped.
@@ -24,10 +25,14 @@ export default {
     // settles and every later auth call in the isolate hangs.
     const auth = createAuth(env, new URL(request.url).origin);
 
-    return handleStartRequest(request, { context: { auth, runEffect: effectRunner(env) } });
+    return handleStartRequest(request, { context: { auth, runEffect: effectRunner(env, auth) } });
   },
 
-  async scheduled(controller) {
-    console.info("Scheduled event", { cron: controller.cron, time: controller.scheduledTime });
+  async scheduled(_controller, env) {
+    // A cron invocation has no request, so better-auth gets no origin. A Run
+    // only refreshes tokens, which needs none; sign-in and linking do.
+    const auth = createAuth(env, undefined);
+
+    await effectRunner(env, auth)(run);
   },
 } satisfies ExportedHandler<WorkerEnv>;

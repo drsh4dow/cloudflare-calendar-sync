@@ -2,10 +2,13 @@ import { D1Client } from "@effect/sql-d1";
 import { Effect, Layer } from "effect";
 
 import type { WorkerEnv } from "../alchemy.run";
+import type { Auth } from "./auth/auth.server";
+import { accessTokensForOwner } from "./auth/calendar-accounts.server";
+import { GoogleCalendar } from "./google/calendar-client";
 import { SyncRules } from "./sync-rules/sync-rules.server";
 
 /** The services every Effect program in the Worker can use. */
-export type AppServices = SyncRules;
+export type AppServices = SyncRules | GoogleCalendar;
 
 /** Runs an Effect program, resolving with its result or rejecting with its failure. */
 export type RunEffect = <A, E>(program: Effect.Effect<A, E, AppServices>) => Promise<A>;
@@ -19,9 +22,16 @@ export type RunEffect = <A, E>(program: Effect.Effect<A, E, AppServices>) => Pro
  * released when the program ends. A runtime shared across a request would
  * need disposing once all its work is done, and Start's streamed responses
  * leave no point where that is known.
+ *
+ * Google Calendar gets the Owner's tokens without a session, so a Run works
+ * the same from the cron and from a request. Server functions that call it
+ * must check the Owner's session first.
  */
-export function effectRunner(env: WorkerEnv): RunEffect {
-  const services = SyncRules.layer.pipe(Layer.provide(D1Client.layer({ db: env.DB })));
+export function effectRunner(env: WorkerEnv, auth: Auth): RunEffect {
+  const services = Layer.mergeAll(
+    SyncRules.layer.pipe(Layer.provide(D1Client.layer({ db: env.DB }))),
+    GoogleCalendar.layer.pipe(Layer.provide(accessTokensForOwner(auth, env.OWNER_EMAIL))),
+  );
 
   return (program) => Effect.runPromise(program.pipe(Effect.provide(services)));
 }

@@ -7,6 +7,7 @@ import {
   GoogleCalendar,
 } from "@/google/calendar-client";
 import type { Auth } from "./auth.server";
+import { normalizeOwnerEmail } from "./owner-admission";
 import { requireOwnerSession } from "./session.server";
 
 export type CalendarAccount = {
@@ -93,6 +94,42 @@ function accessTokensForSession(auth: Auth, headers: Headers) {
           try: () => auth.api.getAccessToken({ body: { accountId: calendarAccountId }, headers }),
           catch: (cause) => new CalendarAccountNeedsReconnect({ calendarAccountId, cause }),
         }).pipe(Effect.map((tokens) => Redacted.make(tokens.accessToken))),
+    }),
+  );
+}
+
+/**
+ * Access tokens for the Owner's Calendar Accounts without a session, which a
+ * Run started by the cron doesn't have. Only server code may provide it,
+ * since it reaches every account the Owner connected. Token failures are
+ * reported as for a session.
+ */
+export function accessTokensForOwner(auth: Auth, ownerEmail: string) {
+  return Layer.effect(
+    AccessTokens,
+    Effect.gen(function* () {
+      const ownerUserId = yield* Effect.cached(
+        Effect.promise(async () => {
+          const { internalAdapter } = await auth.$context;
+          const owner = await internalAdapter.findUserByEmail(normalizeOwnerEmail(ownerEmail));
+
+          return owner?.user.id;
+        }),
+      );
+
+      return AccessTokens.of({
+        forAccount: (calendarAccountId) =>
+          ownerUserId.pipe(
+            Effect.flatMap((userId) =>
+              Effect.tryPromise({
+                try: () =>
+                  auth.api.getAccessToken({ body: { accountId: calendarAccountId, userId } }),
+                catch: (cause) => new CalendarAccountNeedsReconnect({ calendarAccountId, cause }),
+              }),
+            ),
+            Effect.map((tokens) => Redacted.make(tokens.accessToken)),
+          ),
+      });
     }),
   );
 }

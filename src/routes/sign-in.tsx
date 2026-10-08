@@ -70,22 +70,24 @@ function SignIn() {
 }
 
 function ProblemAlert({ problem }: { problem: SignInProblem }) {
-  if (problem === OWNER_ONLY) {
-    return (
-      <Alert variant="destructive">
-        <AlertTitle>Only the Owner can sign in</AlertTitle>
-        <AlertDescription>
-          The Google account you chose isn't this instance's Owner. Choose the Owner's account to
-          continue.
-        </AlertDescription>
-      </Alert>
-    );
-  }
+  const messages: Record<SignInProblem, { title: string; description: string }> = {
+    [OWNER_ONLY]: {
+      title: "Only the Owner can sign in",
+      description:
+        "The Google account you chose isn't this instance's Owner. Choose the Owner's account to continue.",
+    },
+    failed: {
+      title: "Sign-in didn't finish",
+      description: "Google sign-in failed or was cancelled. Try again.",
+    },
+  };
+
+  const message = messages[problem];
 
   return (
     <Alert variant="destructive">
-      <AlertTitle>Sign-in didn't finish</AlertTitle>
-      <AlertDescription>Google sign-in failed or was cancelled. Try again.</AlertDescription>
+      <AlertTitle>{message.title}</AlertTitle>
+      <AlertDescription>{message.description}</AlertDescription>
     </Alert>
   );
 }

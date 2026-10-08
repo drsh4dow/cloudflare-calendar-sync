@@ -31,7 +31,12 @@ type AppliedSyncRule = { readonly rule: SyncRule; readonly outcome: SyncRuleOutc
 /** A Run in which at least one Sync Rule failed. Each failure is logged and in the Run status. */
 export class RunFailed extends Schema.TaggedError<RunFailed>()("RunFailed", {
   failedSyncRules: Schema.Number,
-}) {}
+}) {
+  // Cloudflare shows it with the failed cron invocation.
+  override get message(): string {
+    return `${this.failedSyncRules} Sync Rules failed`;
+  }
+}
 
 /**
  * One Run: brings every Sync Rule's Copies in line with its Source Events

@@ -27,10 +27,14 @@ export function createAuth(env: WorkerEnv, origin: string) {
         // Forced consent makes Google return a refresh token on every grant;
         // the account chooser lets the Owner pick among signed-in accounts.
         prompt: "select_account consent",
+        // better-auth stores ID tokens unencrypted. Turning off sign-in with a
+        // client-submitted ID token means a leaked one can't be replayed to
+        // sign in; it then holds only identity the user table already stores.
+        disableIdTokenSignIn: true,
       },
     },
     account: {
-      // Access and refresh tokens only; better-auth stores ID tokens as is.
+      // Covers access and refresh tokens, not ID tokens.
       encryptOAuthTokens: true,
       accountLinking: { enabled: false },
     },

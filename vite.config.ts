@@ -69,7 +69,9 @@ const config = defineConfig({
       "anti-slop-effect/no-manual-tagged-construction": "error",
       "anti-slop-effect/no-service-constructor-imports": "error",
       "anti-slop-effect/prefer-effect-match": "error",
-      "shadcn/no-restyle": "error",
+      // Layout classes (margins, sizing, flex and grid placement) position a
+      // component without restyling it.
+      "shadcn/no-restyle": ["error", { allow: ["layout"] }],
       "shadcn/no-raw-colors": "error",
       "shadcn/no-arbitrary-values": "error",
       "shadcn/no-inline-styles": "error",

@@ -2,10 +2,9 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { admitOnlyOwner } from "./owner-admission";
 
-const googleSignIn = { method: "oauth", oauth: { providerId: "google" } } as const;
-
 describe("Owner admission", () => {
   const admit = admitOnlyOwner("owner@example.com");
+  const googleSignIn = { method: "oauth", oauth: { providerId: "google" } } as const;
 
   test("the Owner's first Google sign-in may create their user", () => {
     const verdict = admit({

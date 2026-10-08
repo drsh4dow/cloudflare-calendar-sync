@@ -33,6 +33,7 @@ function sourceEvent(id: string, time: EventTime): CalendarEvent {
       title: "Client call",
       description: "Agenda",
       location: "Office",
+      conferenceLink: "https://meet.google.com/abc-defg-hij",
       time,
       visibility: "default",
       busy: true,
@@ -73,12 +74,15 @@ function listed(copy: Copy): CalendarEvent {
  * The Copies a Run a week earlier wrote for the Source Events, as the Target
  * Calendar lists them.
  */
-function copiesOf(sourceEvents: ReadonlyArray<CalendarEvent>): Array<CalendarEvent> {
+function copiesOf(
+  sourceEvents: ReadonlyArray<CalendarEvent>,
+  ruleThen: SyncRule = rule,
+): Array<CalendarEvent> {
   const copies: Array<CalendarEvent> = [];
   const weekEarlier = DateTime.makeUnsafe("2026-10-02T12:00:00Z");
 
   for (const operation of planCopies({
-    rule,
+    rule: ruleThen,
     sourceEvents,
     targetEvents: [],
     now: weekEarlier,
@@ -116,6 +120,151 @@ describe("planCopies", () => {
         },
       },
     ]);
+  });
+
+  test("shows the Source Event's title, description, location, and conference link in Transparent Mode", () => {
+    const transparent: SyncRule = { ...rule, mode: "transparent" };
+
+    const operations = planCopies({
+      rule: transparent,
+      sourceEvents: [sourceEvent("event1", tomorrowMorning)],
+      targetEvents: [],
+      now,
+    });
+
+    expect(operations).toEqual([
+      {
+        kind: "create",
+        copy: expect.objectContaining({
+          sourceEventId: "event1",
+          details: {
+            title: "Client call",
+            description: "Agenda\n\nhttps://meet.google.com/abc-defg-hij",
+            location: "Office",
+            time: tomorrowMorning,
+            visibility: "default",
+            busy: true,
+          },
+        }),
+      },
+    ]);
+  });
+
+  test("shows the conference link once when the Source Event has no description or already shows it", () => {
+    const transparent: SyncRule = { ...rule, mode: "transparent" };
+    const link = "https://meet.google.com/abc-defg-hij";
+    const call = sourceEvent("event1", tomorrowMorning);
+    const { description: _, ...withoutDescription } = call.details;
+
+    const operations = planCopies({
+      rule: transparent,
+      sourceEvents: [
+        { ...call, id: "event1", details: withoutDescription },
+        { ...call, id: "event2", details: { ...call.details, description: `Join at ${link}` } },
+      ],
+      targetEvents: [],
+      now,
+    });
+
+    expect(operations).toEqual([
+      {
+        kind: "create",
+        copy: expect.objectContaining({
+          details: expect.objectContaining({ description: link }),
+        }),
+      },
+      {
+        kind: "create",
+        copy: expect.objectContaining({
+          details: expect.objectContaining({ description: `Join at ${link}` }),
+        }),
+      },
+    ]);
+  });
+
+  test("keeps a private Source Event private in Transparent Mode", () => {
+    const transparent: SyncRule = { ...rule, mode: "transparent" };
+    const call = sourceEvent("event1", tomorrowMorning);
+
+    const operations = planCopies({
+      rule: transparent,
+      sourceEvents: [{ ...call, details: { ...call.details, visibility: "private" } }],
+      targetEvents: [],
+      now,
+    });
+
+    expect(operations).toEqual([
+      {
+        kind: "create",
+        copy: expect.objectContaining({
+          details: expect.objectContaining({ title: "Client call", visibility: "private" }),
+        }),
+      },
+    ]);
+  });
+
+  test("copies all-day Source Events as all-day Copies only when the rule includes them", () => {
+    const tomorrow: EventTime = { kind: "allDay", startDate: "2026-10-10", endDate: "2026-10-11" };
+    const sourceEvents = [sourceEvent("holiday1", tomorrow)];
+
+    expect(planCopies({ rule, sourceEvents, targetEvents: [], now })).toEqual([]);
+
+    expect(
+      planCopies({
+        rule: { ...rule, includeAllDayEvents: true },
+        sourceEvents,
+        targetEvents: [],
+        now,
+      }),
+    ).toEqual([
+      {
+        kind: "create",
+        copy: expect.objectContaining({
+          sourceEventId: "holiday1",
+          details: expect.objectContaining({ title: "Blocked (Freelance)", time: tomorrow }),
+        }),
+      },
+    ]);
+  });
+
+  test("deletes all-day Copies when the rule stops including all-day events", () => {
+    const tomorrow: EventTime = { kind: "allDay", startDate: "2026-10-10", endDate: "2026-10-11" };
+
+    const sourceEvents = [
+      sourceEvent("holiday1", tomorrow),
+      sourceEvent("event1", tomorrowMorning),
+    ];
+
+    const copies = copiesOf(sourceEvents, { ...rule, includeAllDayEvents: true });
+    const allDayCopy = copies.find((copy) => copy.details.time.kind === "allDay");
+
+    expect(planCopies({ rule, sourceEvents, targetEvents: copies, now })).toEqual([
+      { kind: "delete", copyId: allDayCopy!.id },
+    ]);
+  });
+
+  test("rewrites Copies when the rule's Mode or private title changes", () => {
+    const sourceEvents = [sourceEvent("event1", tomorrowMorning)];
+    const transparent: SyncRule = { ...rule, mode: "transparent" };
+    const retitled: SyncRule = { ...rule, privateTitle: "Busy" };
+
+    const edits = [
+      { before: rule, after: transparent },
+      { before: transparent, after: rule },
+      { before: rule, after: retitled },
+    ];
+
+    for (const { before, after } of edits) {
+      const copies = copiesOf(sourceEvents, before);
+      const [expected] = copiesOf(sourceEvents, after);
+
+      expect(planCopies({ rule: after, sourceEvents, targetEvents: copies, now })).toEqual([
+        {
+          kind: "update",
+          copy: expect.objectContaining({ id: expected!.id, details: expected!.details }),
+        },
+      ]);
+    }
   });
 
   test("gives each occurrence of a recurring event its own Copy", () => {
@@ -194,7 +343,12 @@ describe("planCopies", () => {
     const edited = { ...copy!, details: { ...copy!.details, title: "Lunch" } };
     const withReminder = { ...copy!, hasReminders: true };
 
-    for (const changed of [edited, withReminder]) {
+    const withConference = {
+      ...copy!,
+      details: { ...copy!.details, conferenceLink: "https://meet.google.com/xyz-abcd-efg" },
+    };
+
+    for (const changed of [edited, withReminder, withConference]) {
       expect(planCopies({ rule, sourceEvents, targetEvents: [changed], now })).toEqual([
         { kind: "update", copy: expect.objectContaining({ id: copy!.id, details: copy!.details }) },
       ]);

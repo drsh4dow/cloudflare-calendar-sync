@@ -1,11 +1,24 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { CalendarAccounts } from "@/components/calendar-accounts";
 import { Button } from "@/components/ui/button";
+import { listCalendarAccounts } from "@/auth/calendar-accounts";
 import { authClient } from "@/auth/client";
 import { getSignedInOwner } from "@/auth/session";
 
+type DashboardSearch = { error?: "linkFailed" };
+
 export const Route = createFileRoute("/")({
+  // better-auth sends a failed account link back here with an `error` code.
+  // Every code gets the same message, and the router rewrites the URL to match.
+  validateSearch: (search): DashboardSearch => {
+    if (search["error"] === undefined) {
+      return {};
+    }
+
+    return { error: "linkFailed" };
+  },
   beforeLoad: async () => {
     const owner = await getSignedInOwner();
 
@@ -15,11 +28,14 @@ export const Route = createFileRoute("/")({
 
     return { owner };
   },
+  loader: () => listCalendarAccounts(),
   component: Dashboard,
 });
 
 function Dashboard() {
   const { owner } = Route.useRouteContext();
+  const accounts = Route.useLoaderData();
+  const search = Route.useSearch();
   const navigate = useNavigate();
   const [signOutFailed, setSignOutFailed] = useState(false);
 
@@ -51,7 +67,9 @@ function Dashboard() {
           </Button>
         </div>
       </header>
-      <main className="mx-auto max-w-4xl p-6" />
+      <main className="mx-auto max-w-4xl p-6">
+        <CalendarAccounts accounts={accounts} linkFailed={search.error === "linkFailed"} />
+      </main>
     </div>
   );
 }

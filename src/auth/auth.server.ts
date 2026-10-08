@@ -36,8 +36,20 @@ export function createAuth(env: WorkerEnv, origin: string) {
     account: {
       // Covers access and refresh tokens, not ID tokens.
       encryptOAuthTokens: true,
-      accountLinking: { enabled: false },
+      accountLinking: {
+        // The signed-in Owner links Calendar Accounts with any Google email
+        // (spec Q25). Implicit linking would attach another Google identity
+        // with the Owner's email at sign-in, and the Owner gate admits every
+        // link.
+        enabled: true,
+        allowDifferentEmails: true,
+        disableImplicitLinking: true,
+      },
     },
+    // Disconnecting goes through `disconnectCalendarAccount`, which refuses
+    // the Owner's sign-in account. Server-side `auth.api` calls still reach
+    // the endpoint.
+    disabledPaths: ["/unlink-account"],
     user: { validateUserInfo: admitOnlyOwner(env.OWNER_EMAIL) },
     hooks: { before: discardHalfCreatedOwner(env.OWNER_EMAIL) },
     // Every failed sign-in, including an expired OAuth state, returns to the
@@ -63,8 +75,9 @@ export type Auth = ReturnType<typeof createAuth>;
  * disabled every later sign-in fails with `account_not_linked`. Before each
  * OAuth callback, this deletes the Owner's user when it has no accounts, so
  * the callback creates both again. Such a user never got a session, and a
- * finished Owner can't reach zero accounts: better-auth refuses to unlink a
- * user's last account while `accountLinking.allowUnlinkingAll` is unset.
+ * finished Owner can't reach zero accounts: `disconnectCalendarAccount`
+ * refuses the sign-in account, and better-auth refuses to unlink a user's
+ * last account while `accountLinking.allowUnlinkingAll` is unset.
  */
 function discardHalfCreatedOwner(ownerEmail: string) {
   const owner = normalizeOwnerEmail(ownerEmail);

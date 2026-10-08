@@ -1,21 +1,48 @@
-import { Cache, DateTime, Effect } from "effect";
+import { Cache, DateTime, Effect, Schema } from "effect";
 
-import { GoogleCalendar } from "@/google/calendar-client";
+import {
+  type CalendarAccountNeedsReconnect,
+  GoogleCalendar,
+  type GoogleCalendarUnavailable,
+} from "@/google/calendar-client";
 import type { SyncRule } from "@/sync-rules/sync-rule";
 import { SyncRules } from "@/sync-rules/sync-rules.server";
 import { type CopyOperation, planCopies, syncWindowAt } from "./planner";
+import type { CalendarAccountProblem } from "./run-status";
+import { type RunReport, RunStatusStore } from "./run-status.server";
 
 /** A Calendar as one Calendar Account reaches it. */
 type CalendarRef = { readonly calendarAccountId: string; readonly calendarId: string };
 
+/** How applying one Sync Rule ended. */
+type SyncRuleOutcome =
+  | { readonly kind: "succeeded" }
+  /** A request of one of the rule's Calendar Accounts failed. */
+  | {
+      readonly kind: "calendarAccountFailed";
+      readonly calendarAccountId: string;
+      readonly problem: CalendarAccountProblem;
+    }
+  /** Anything else, such as a bug. */
+  | { readonly kind: "defect" };
+
+type AppliedSyncRule = { readonly rule: SyncRule; readonly outcome: SyncRuleOutcome };
+
+/** A Run in which at least one Sync Rule failed. Each failure is logged and in the Run status. */
+export class RunFailed extends Schema.TaggedError<RunFailed>()("RunFailed", {
+  failedSyncRules: Schema.Number,
+}) {}
+
 /**
  * One Run: brings every Sync Rule's Copies in line with its Source Events
- * over the Sync Window, writing only the differences. The cron and "Run now"
- * both run it.
+ * over the Sync Window, writing only the differences, and records the Run
+ * status. The cron and "Run now" both run it. A failure stops only the Sync
+ * Rule it happens in, and the Run fails at the end when any Sync Rule did.
  */
 export const run = Effect.gen(function* () {
   const syncRules = yield* SyncRules;
   const google = yield* GoogleCalendar;
+  const runStatus = yield* RunStatusStore;
   const now = yield* DateTime.now;
   const window = syncWindowAt(now);
   const rules = yield* syncRules.list;
@@ -79,5 +106,88 @@ export const run = Effect.gen(function* () {
     yield* Effect.logInfo("Sync Rule applied", { syncRuleId: rule.id, writes: operations.length });
   });
 
-  yield* Effect.forEach(rules, syncRule, { discard: true });
+  const applySyncRule = (rule: SyncRule) =>
+    syncRule(rule).pipe(
+      Effect.as<SyncRuleOutcome>({ kind: "succeeded" }),
+      Effect.catchTags({
+        CalendarAccountNeedsReconnect: (error) =>
+          calendarAccountFailed(rule, error, "needsReconnect"),
+        GoogleCalendarUnavailable: (error) => calendarAccountFailed(rule, error, "unavailable"),
+      }),
+      Effect.catchDefect((defect) =>
+        Effect.logError("Sync Rule failed", { syncRuleId: rule.id, defect }).pipe(
+          Effect.as<SyncRuleOutcome>({ kind: "defect" }),
+        ),
+      ),
+      Effect.map((outcome): AppliedSyncRule => ({ rule, outcome })),
+    );
+
+  const applied = yield* Effect.forEach(rules, applySyncRule);
+
+  yield* runStatus.record({
+    startedAt: now,
+    syncRules: applied.map(({ rule, outcome }) => ({
+      syncRuleId: rule.id,
+      succeeded: outcome.kind === "succeeded",
+    })),
+    calendarAccounts: calendarAccountOutcomes(applied),
+  });
+
+  const failedSyncRules = applied.filter(({ outcome }) => outcome.kind !== "succeeded").length;
+
+  if (failedSyncRules > 0) {
+    yield* new RunFailed({ failedSyncRules });
+  }
 });
+
+function calendarAccountFailed(
+  rule: SyncRule,
+  error: CalendarAccountNeedsReconnect | GoogleCalendarUnavailable,
+  problem: CalendarAccountProblem,
+): Effect.Effect<SyncRuleOutcome> {
+  const { calendarAccountId } = error;
+
+  return Effect.logError("Sync Rule failed", { syncRuleId: rule.id, error }).pipe(
+    Effect.as<SyncRuleOutcome>({ kind: "calendarAccountFailed", calendarAccountId, problem }),
+  );
+}
+
+/**
+ * How the Run went for each Calendar Account it used. A request of the
+ * account failed, or it served a Sync Rule that succeeded. When both
+ * happened, the failure counts, and `needsReconnect` outranks
+ * `unavailable` because only the Owner can fix it. An account whose Sync
+ * Rules all failed for another reason may not have been used, so it is left
+ * out.
+ */
+function calendarAccountOutcomes(
+  applied: ReadonlyArray<AppliedSyncRule>,
+): RunReport["calendarAccounts"] {
+  const problems = new Map<string, CalendarAccountProblem | null>();
+
+  for (const { outcome } of applied) {
+    if (outcome.kind !== "calendarAccountFailed") {
+      continue;
+    }
+
+    if (problems.get(outcome.calendarAccountId) !== "needsReconnect") {
+      problems.set(outcome.calendarAccountId, outcome.problem);
+    }
+  }
+
+  for (const { rule, outcome } of applied) {
+    if (outcome.kind !== "succeeded") {
+      continue;
+    }
+
+    const { sourceCalendarAccountId, targetCalendarAccountId } = rule;
+
+    for (const calendarAccountId of [sourceCalendarAccountId, targetCalendarAccountId]) {
+      if (!problems.has(calendarAccountId)) {
+        problems.set(calendarAccountId, null);
+      }
+    }
+  }
+
+  return Array.from(problems, ([calendarAccountId, problem]) => ({ calendarAccountId, problem }));
+}

@@ -1,7 +1,12 @@
 import { DateTime, Effect, Layer } from "effect";
 
 import { type AccessRole, type Calendar, isReadable, isWritable } from "./calendar";
-import { CopyIdTaken, GoogleCalendar, GoogleCalendarUnavailable } from "./calendar-client";
+import {
+  CalendarAccountNeedsReconnect,
+  CopyIdTaken,
+  GoogleCalendar,
+  GoogleCalendarUnavailable,
+} from "./calendar-client";
 import type { CalendarEvent, Copy, EventTime, SyncWindow } from "./calendar-event";
 
 export type CalendarAccess = {
@@ -18,6 +23,10 @@ export type FakeGoogleCalendar = {
   deleteEvent(calendarId: string, eventId: string): void;
   /** Makes every later listing of the Calendar fail, as when one of its pages fails. */
   failReads(calendarId: string): void;
+  /** Refuses every later request of the Calendar Account, as when the Owner revokes its grant. */
+  revokeGrant(calendarAccountId: string): void;
+  /** Accepts the Calendar Account's requests again, as after the Owner reconnects it. */
+  reconnect(calendarAccountId: string): void;
   /** The Calendar's events that aren't deleted. */
   events(calendarId: string): ReadonlyArray<CalendarEvent>;
   /** The number of insert, update, and delete requests so far. */
@@ -36,6 +45,7 @@ type StoredEvent = { readonly event: CalendarEvent; readonly deleted: boolean };
 export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): FakeGoogleCalendar {
   const calendars = new Map<string, Map<string, StoredEvent>>();
   const failingReads = new Set<string>();
+  const revokedGrants = new Set<string>();
   let writes = 0;
 
   function calendar(calendarId: string): Map<string, StoredEvent> {
@@ -76,11 +86,23 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
     return live;
   }
 
-  function requireAccess(
+  function requireGrant(
+    calendarAccountId: string,
+  ): Effect.Effect<void, CalendarAccountNeedsReconnect> {
+    if (revokedGrants.has(calendarAccountId)) {
+      return Effect.fail(new CalendarAccountNeedsReconnect({ calendarAccountId, cause: 401 }));
+    }
+
+    return Effect.void;
+  }
+
+  const requireAccess = Effect.fnUntraced(function* (
     calendarAccountId: string,
     calendarId: string,
     allows: (calendar: Calendar) => boolean,
-  ): Effect.Effect<void, GoogleCalendarUnavailable> {
+  ) {
+    yield* requireGrant(calendarAccountId);
+
     const granted = access.find(
       (candidate) =>
         candidate.calendarAccountId === calendarAccountId && candidate.calendarId === calendarId,
@@ -90,11 +112,9 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
       granted === undefined ||
       !allows({ id: calendarId, name: calendarId, accessRole: granted.accessRole })
     ) {
-      return Effect.fail(new GoogleCalendarUnavailable({ calendarAccountId, cause: 403 }));
+      yield* new GoogleCalendarUnavailable({ calendarAccountId, cause: 403 });
     }
-
-    return Effect.void;
-  }
+  });
 
   const startWrite = Effect.fnUntraced(function* (calendarAccountId: string, calendarId: string) {
     yield* Effect.yieldNow;
@@ -107,6 +127,7 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
     GoogleCalendar.of({
       listCalendars: Effect.fnUntraced(function* (calendarAccountId: string) {
         yield* Effect.yieldNow;
+        yield* requireGrant(calendarAccountId);
 
         const calendarList: Array<Calendar> = [];
 
@@ -182,6 +203,12 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
     deleteEvent,
     failReads: (calendarId) => {
       failingReads.add(calendarId);
+    },
+    revokeGrant: (calendarAccountId) => {
+      revokedGrants.add(calendarAccountId);
+    },
+    reconnect: (calendarAccountId) => {
+      revokedGrants.delete(calendarAccountId);
     },
     events,
     writes: () => writes,

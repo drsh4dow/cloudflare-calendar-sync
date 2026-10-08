@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { listCalendarAccounts } from "@/auth/calendar-accounts";
 import { authClient } from "@/auth/client";
 import { getSignedInOwner } from "@/auth/session";
+import { getRunStatus } from "@/runs/runs";
 import { listSyncRules } from "@/sync-rules/sync-rules";
 
 type DashboardSearch = { error?: "linkFailed" };
@@ -32,16 +33,20 @@ export const Route = createFileRoute("/")({
     return { owner };
   },
   loader: async () => {
-    const [accounts, rules] = await Promise.all([listCalendarAccounts(), listSyncRules()]);
+    const [accounts, rules, runStatus] = await Promise.all([
+      listCalendarAccounts(),
+      listSyncRules(),
+      getRunStatus(),
+    ]);
 
-    return { accounts, rules };
+    return { accounts, rules, runStatus };
   },
   component: Dashboard,
 });
 
 function Dashboard() {
   const { owner } = Route.useRouteContext();
-  const { accounts, rules } = Route.useLoaderData();
+  const { accounts, rules, runStatus } = Route.useLoaderData();
   const search = Route.useSearch();
   const navigate = useNavigate();
   const [signOutFailed, setSignOutFailed] = useState(false);
@@ -75,9 +80,13 @@ function Dashboard() {
         </div>
       </header>
       <main className="mx-auto flex max-w-4xl flex-col gap-10 p-6">
-        <CalendarAccounts accounts={accounts} linkFailed={search.error === "linkFailed"} />
-        <SyncRulesSection rules={rules} accounts={accounts} />
-        <RunsSection />
+        <CalendarAccounts
+          accounts={accounts}
+          statuses={runStatus.calendarAccounts}
+          linkFailed={search.error === "linkFailed"}
+        />
+        <SyncRulesSection rules={rules} accounts={accounts} statuses={runStatus.syncRules} />
+        <RunsSection syncRuleStatuses={runStatus.syncRules} />
       </main>
     </div>
   );

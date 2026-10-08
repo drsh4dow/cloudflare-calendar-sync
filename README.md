@@ -41,14 +41,15 @@ Why these settings:
 
 The production host is `calendar-sync-prod.<your-subdomain>.workers.dev`,
 where the subdomain is your Cloudflare account's workers.dev subdomain.
-`bun run deploy` prints the full URL. If you add a custom domain, register
-its redirect URI as well. If local development starts on a port other than
+`bun run deploy` prints the full URL. With a custom domain (`CUSTOM_DOMAIN`
+below), also register `https://<custom-domain>/api/auth/callback/google`.
+If local development starts on a port other than
 1337 because 1337 is taken, register that port's URI too or free the port.
 
 ## `.env`
 
-Copy `.env.example` to `.env` and fill in every value. Alchemy deploys them as
-Worker secrets.
+Copy `.env.example` to `.env` and fill in every value. Alchemy deploys the
+four secrets below as Worker secrets.
 
 | Variable               | Value                                       |
 | ---------------------- | ------------------------------------------- |
@@ -56,6 +57,11 @@ Worker secrets.
 | `GOOGLE_CLIENT_ID`     | The OAuth client's ID                       |
 | `GOOGLE_CLIENT_SECRET` | The OAuth client's secret                   |
 | `BETTER_AUTH_SECRET`   | The output of `openssl rand -base64 32`     |
+
+To serve the app on your own hostname, set `CUSTOM_DOMAIN`, for example
+`calendar.example.com`. Its zone must be on Cloudflare in the same account;
+the deploy creates the DNS record and certificate. The workers.dev URL keeps
+working.
 
 The Owner's sign-in account is also their first Calendar Account.
 

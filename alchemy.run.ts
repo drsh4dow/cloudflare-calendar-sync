@@ -16,6 +16,10 @@ export const App = Cloudflare.Website.Vite(
     return {
       name: `calendar-sync-${stage}`,
       main: "./src/server.ts",
+      // Optional hostname on a Cloudflare zone in the same account. Without it
+      // the Worker serves only its workers.dev URL; null also detaches a
+      // domain that a previous deploy attached.
+      domain: Config.NonEmptyString("CUSTOM_DOMAIN").pipe(Config.withDefault(null)),
       compatibility: { date: "2026-09-18", flags: ["nodejs_compat"] },
       crons: ["*/5 * * * *"],
       env: {

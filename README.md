@@ -25,7 +25,8 @@ serves both local development and production.
    - `http://localhost:1337/api/auth/callback/google` for local development
    - `https://calendar-sync-prod.<your-subdomain>.workers.dev/api/auth/callback/google`
      for production
-7. Copy the client ID and client secret into `.env` (next section).
+7. Copy the client ID and client secret into `.env` (next section). Google
+   shows the secret only once, when the client is created.
 
 Why these settings:
 

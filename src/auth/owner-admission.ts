@@ -17,9 +17,8 @@ export function admitOnlyOwner(ownerEmail: string) {
 
   return function admit(identity: IncomingIdentity): ValidateUserInfoResult | undefined {
     if (identity.source.action === "link-account") {
-      // A Calendar Account may use any Google identity (spec Q25). Linking
-      // stays closed through `account.accountLinking` until #5 opens it.
-      // An explicit link starts only from the Owner's session; better-auth
+      // A Calendar Account may use any Google identity (spec Q25). An
+      // explicit link starts only from the Owner's session; better-auth
       // reports implicit links with this action too, so implicit linking
       // must stay disabled.
       return undefined;

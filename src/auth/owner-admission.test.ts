@@ -24,6 +24,15 @@ describe("Owner admission", () => {
     expect(verdict?.error).toBe("owner_only");
   });
 
+  test("the signed-in Owner may link a Google account with another email", () => {
+    const verdict = admit({
+      user: { email: "freelance@example.com", emailVerified: true },
+      source: { ...googleSignIn, action: "link-account" },
+    });
+
+    expect(verdict).toBeUndefined();
+  });
+
   test("OWNER_EMAIL is matched without regard to case or surrounding spaces", () => {
     const admitTypedOwner = admitOnlyOwner(" Owner@Example.com\n");
 

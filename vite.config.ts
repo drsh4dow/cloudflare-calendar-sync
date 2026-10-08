@@ -15,12 +15,29 @@ const config = defineConfig({
   },
   lint: {
     ignorePatterns: [...generatedFiles],
+    // Listing plugins replaces Oxlint's defaults (typescript, unicorn, oxc).
+    plugins: ["typescript", "unicorn", "oxc", "react", "jsx-a11y", "import", "vitest"],
+    categories: {
+      correctness: "error",
+      suspicious: "error",
+      perf: "error",
+    },
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
-    rules: { "vite-plus/prefer-vite-plus-imports": "error" },
+    rules: {
+      "vite-plus/prefer-vite-plus-imports": "error",
+      // The automatic JSX runtime (tsconfig `jsx: react-jsx`) needs no React in scope.
+      "react/react-in-jsx-scope": "off",
+    },
     options: { typeAware: true, typeCheck: true },
   },
+  test: {
+    // Remove once the first test lands; until then Vitest fails on an empty run.
+    passWithNoTests: true,
+  },
   resolve: { tsconfigPaths: true },
-  plugins: lazyPlugins(() => [devtools(), tailwindcss(), tanstackStart(), viteReact()]),
+  // lazyPlugins returns undefined while Vite+ reads only the lint, fmt, or test
+  // block, and its return type rejects that under exactOptionalPropertyTypes.
+  plugins: lazyPlugins(() => [devtools(), tailwindcss(), tanstackStart(), viteReact()]) ?? [],
 });
 
 export default config;

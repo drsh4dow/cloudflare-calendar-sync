@@ -148,6 +148,7 @@ function CalendarAccountItem({ account, status }: CalendarAccountItemProps) {
             size="sm"
             disabled={pending}
             onClick={reconnect}
+            aria-label={`Reconnect ${account.email}`}
           >
             Reconnect
           </Button>
@@ -194,7 +195,7 @@ function DisconnectButton({ email, disabled, onConfirm }: DisconnectButtonProps)
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm" disabled={disabled}>
+        <Button variant="outline" size="sm" disabled={disabled} aria-label={`Disconnect ${email}`}>
           Disconnect
         </Button>
       </AlertDialogTrigger>

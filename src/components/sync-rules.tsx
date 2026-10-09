@@ -378,6 +378,11 @@ function CreateSyncRuleForm({ rules, accounts, onCreated }: CreateSyncRuleFormPr
   const problem = pairingProblem(rules, source, target);
   const reverseAllowed = source !== undefined && isWritable(source.calendar);
 
+  const pairingProblemMessages: Record<PairingProblem, string> = {
+    sameCalendar: "Source and Target must be different Calendars.",
+    ruleExists: "A Sync Rule from this Source Calendar to this Target Calendar already exists.",
+  };
+
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -547,11 +552,6 @@ function CalendarSelect({ id, groups, value, onValueChange }: CalendarSelectProp
 }
 
 type PairingProblem = "sameCalendar" | "ruleExists";
-
-const pairingProblemMessages: Record<PairingProblem, string> = {
-  sameCalendar: "Source and Target must be different Calendars.",
-  ruleExists: "A Sync Rule from this Source Calendar to this Target Calendar already exists.",
-};
 
 /**
  * Why the Calendars can't be paired, or null when they can or aren't both

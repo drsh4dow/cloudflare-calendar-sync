@@ -275,6 +275,37 @@ describe("run", () => {
     expect(failure).toEqual(new RunFailed({ failedSyncRules: 1 }));
   });
 
+  test("a Source Event whose id is too long for a Copy id fails only its Sync Rule, which still writes its other Copies", async () => {
+    const google = newGoogleCalendar();
+    const reports: Array<RunReport> = [];
+
+    // A Copy id is the 32-character Sync Rule id and two characters per
+    // character of the source event id, and Google allows 1024 (ADR 0002).
+    google.putEvent(personalCalendar, meeting("a".repeat(496), tomorrowAt(9)));
+    google.putEvent(personalCalendar, meeting("b".repeat(497), tomorrowAt(11)));
+    google.putEvent(freelanceCalendar, meeting("gig", tomorrowAt(14)));
+
+    const failure = await Effect.runPromise(
+      Effect.flip(runAgainst(google, [personalToWork, freelanceToWork], reports)),
+    );
+
+    expect(google.events(workCalendar)).toEqual([
+      copyInWork(tomorrowAt(9)),
+      expect.objectContaining({ syncRuleId: freelanceToWork.id }),
+    ]);
+
+    expect(failure).toEqual(new RunFailed({ failedSyncRules: 1 }));
+
+    expect(reports[0]).toEqual({
+      startedAt: expect.anything(),
+      syncRules: [
+        { syncRuleId: personalToWork.id, succeeded: false },
+        { syncRuleId: freelanceToWork.id, succeeded: true },
+      ],
+      calendarAccounts: expect.arrayContaining([{ calendarAccountId: work, problem: null }]),
+    });
+  });
+
   test("records which Sync Rules failed and which Calendar Account needs reconnect", async () => {
     const google = newGoogleCalendar();
     const reports: Array<RunReport> = [];

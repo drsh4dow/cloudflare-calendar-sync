@@ -141,6 +141,19 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
     writes += 1;
   });
 
+  const startCopyWrite = Effect.fnUntraced(function* (
+    calendarAccountId: string,
+    calendarId: string,
+    copy: Copy,
+  ) {
+    yield* startWrite(calendarAccountId, calendarId);
+
+    // Google refuses an event id longer than 1024 characters with a 400.
+    if (copy.id.length > 1024) {
+      yield* new GoogleCalendarUnavailable({ calendarAccountId, cause: 400 });
+    }
+  });
+
   const layer = Layer.succeed(
     GoogleCalendar,
     GoogleCalendar.of({
@@ -202,7 +215,7 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
         calendarId: string,
         copy: Copy,
       ) {
-        yield* startWrite(calendarAccountId, calendarId);
+        yield* startCopyWrite(calendarAccountId, calendarId, copy);
 
         if (calendar(calendarId).has(copy.id)) {
           yield* new CopyIdTaken({ calendarId, copyId: copy.id });
@@ -215,7 +228,7 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
         calendarId: string,
         copy: Copy,
       ) {
-        yield* startWrite(calendarAccountId, calendarId);
+        yield* startCopyWrite(calendarAccountId, calendarId, copy);
 
         if (calendar(calendarId).has(copy.id)) {
           putEvent(calendarId, listedCopy(copy));

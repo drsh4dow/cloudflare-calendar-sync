@@ -35,7 +35,9 @@ export class RunStatusStore extends Context.Service<
     /**
      * Replaces the status of each Sync Rule and Calendar Account in the
      * report, keeping a Sync Rule's last success when the Run failed it.
-     * Skips the ones deleted while the Run went on.
+     * Skips the ones deleted while the Run went on, and the ones whose
+     * status comes from a Run that started later, so a Run that overlapped a
+     * newer one and finished after it can't bring back older outcomes.
      */
     record(report: RunReport): Effect.Effect<void, RunStatusError>;
     readonly read: Effect.Effect<RunStatus, RunStatusError>;
@@ -61,6 +63,7 @@ export class RunStatusStore extends Context.Service<
             "lastRunSucceeded" = excluded."lastRunSucceeded",
             "lastSucceededAt" = coalesce(excluded."lastSucceededAt",
               "syncRuleStatus"."lastSucceededAt")
+          WHERE excluded."lastRunAt" > "syncRuleStatus"."lastRunAt"
         `,
       });
 
@@ -75,6 +78,7 @@ export class RunStatusStore extends Context.Service<
           ON CONFLICT ("calendarAccountId") DO UPDATE
           SET "lastRunAt" = excluded."lastRunAt",
             "lastRunProblem" = excluded."lastRunProblem"
+          WHERE excluded."lastRunAt" > "calendarAccountStatus"."lastRunAt"
         `,
       });
 

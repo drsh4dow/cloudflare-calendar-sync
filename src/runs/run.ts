@@ -23,8 +23,8 @@ type SyncRuleOutcome =
       readonly calendarAccountId: string;
       readonly problem: CalendarAccountProblem;
     }
-  /** Anything else, such as a bug. */
-  | { readonly kind: "defect" };
+  /** Anything else, such as a bug or a Source Event the rule can't copy. */
+  | { readonly kind: "failed" };
 
 type AppliedSyncRule = { readonly rule: SyncRule; readonly outcome: SyncRuleOutcome };
 
@@ -35,6 +35,20 @@ export class RunFailed extends Schema.TaggedError<RunFailed>()("RunFailed", {
   // Cloudflare shows it with the failed cron invocation.
   override get message(): string {
     return `${this.failedSyncRules} Sync Rules failed`;
+  }
+}
+
+/**
+ * Source Events whose Copy id would be longer than Google allows, which
+ * happens for source event ids over 496 characters (ADR 0002). The Sync Rule's
+ * other Copies are written regardless.
+ */
+class UncopyableSourceEvents extends Schema.TaggedError<UncopyableSourceEvents>()(
+  "UncopyableSourceEvents",
+  { syncRuleId: Schema.String, sourceEventIds: Schema.Array(Schema.String) },
+) {
+  override get message(): string {
+    return `${this.sourceEventIds.length} Source Events have ids too long for a Copy id`;
   }
 }
 
@@ -89,7 +103,7 @@ export const run = Effect.gen(function* () {
 
     const targetListing = yield* Cache.get(listings, target);
 
-    const operations = planCopies({
+    const plan = planCopies({
       rule,
       sourceEvents: source.events,
       target: targetListing,
@@ -102,13 +116,19 @@ export const run = Effect.gen(function* () {
       orphanDeletions = planOrphanDeletions(targetListing, deletedSyncRuleIds, now);
     }
 
-    yield* applyCopyOperations(target, [...operations, ...orphanDeletions]);
+    yield* applyCopyOperations(target, [...plan.operations, ...orphanDeletions]);
 
     yield* Effect.logInfo("Sync Rule applied", {
       syncRuleId: rule.id,
-      writes: operations.length,
+      writes: plan.operations.length,
       orphanCopiesDeleted: orphanDeletions.length,
     });
+
+    const sourceEventIds = plan.uncopyableSourceEventIds;
+
+    if (sourceEventIds.length > 0) {
+      yield* new UncopyableSourceEvents({ syncRuleId: rule.id, sourceEventIds });
+    }
   });
 
   const applySyncRule = (rule: SyncRule) =>
@@ -118,10 +138,14 @@ export const run = Effect.gen(function* () {
         CalendarAccountNeedsReconnect: (error) =>
           calendarAccountFailed(rule, error, "needsReconnect"),
         GoogleCalendarUnavailable: (error) => calendarAccountFailed(rule, error, "unavailable"),
+        UncopyableSourceEvents: (error) =>
+          Effect.logError("Sync Rule failed", { syncRuleId: rule.id, error }).pipe(
+            Effect.as<SyncRuleOutcome>({ kind: "failed" }),
+          ),
       }),
       Effect.catchDefect((defect) =>
         Effect.logError("Sync Rule failed", { syncRuleId: rule.id, defect }).pipe(
-          Effect.as<SyncRuleOutcome>({ kind: "defect" }),
+          Effect.as<SyncRuleOutcome>({ kind: "failed" }),
         ),
       ),
       Effect.map((outcome): AppliedSyncRule => ({ rule, outcome })),

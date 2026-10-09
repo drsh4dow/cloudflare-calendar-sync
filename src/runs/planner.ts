@@ -28,6 +28,16 @@ export type CopyOperation =
   | { readonly kind: "update"; readonly copy: Copy }
   | { readonly kind: "delete"; readonly copyId: string };
 
+/** What a Run does for one Sync Rule. */
+export type CopyPlan = {
+  readonly operations: ReadonlyArray<CopyOperation>;
+  /**
+   * The Source Events the rule should copy but can't, because their Copy id
+   * would be longer than Google allows (ADR 0002).
+   */
+  readonly uncopyableSourceEventIds: ReadonlyArray<string>;
+};
+
 export type PlanInput = {
   readonly rule: SyncRule;
   /** Every event a complete read of the Source Calendar returned. */
@@ -44,7 +54,8 @@ export type PlanInput = {
  * The writes that bring a Sync Rule's Copies in line with its Source Events.
  * Events without the rule's tag are never written, and Copies that have ended
  * are left as they are. A Copy whose Source Event the listing lacks is
- * deleted, so the listings must be complete.
+ * deleted, so the listings must be complete. A Source Event without a valid
+ * Copy id is reported instead of copied.
  *
  * A Source Event isn't copied when the Target Calendar already holds the same
  * meeting and the Owner hasn't declined it there, so a meeting the Owner was
@@ -54,12 +65,7 @@ export type PlanInput = {
  * apart. The original start is Google's `originalStartTime` when present,
  * otherwise the start, so an occurrence still matches after it moves.
  */
-export function planCopies({
-  rule,
-  sourceEvents,
-  target,
-  now,
-}: PlanInput): ReadonlyArray<CopyOperation> {
+export function planCopies({ rule, sourceEvents, target, now }: PlanInput): CopyPlan {
   // Copies live in the Target Calendar, so their all-day dates are in its time zone.
   const nowInTarget = DateTime.setZone(now, target.timeZone);
   const unclaimedCopies = new Map<string, CalendarEvent>();
@@ -76,6 +82,7 @@ export function planCopies({
   }
 
   const operations: Array<CopyOperation> = [];
+  const uncopyableSourceEventIds: Array<string> = [];
 
   for (const event of sourceEvents) {
     if (!shouldCopy(rule, event) || meetingsInTarget.has(meetingOccurrence(event))) {
@@ -83,6 +90,13 @@ export function planCopies({
     }
 
     const copy = copyOf(rule, event);
+
+    // Google allows event ids of up to 1024 characters.
+    if (copy.id.length > 1024) {
+      uncopyableSourceEventIds.push(event.id);
+      continue;
+    }
+
     const existing = unclaimedCopies.get(copy.id);
 
     unclaimedCopies.delete(copy.id);
@@ -100,7 +114,7 @@ export function planCopies({
     }
   }
 
-  return operations;
+  return { operations, uncopyableSourceEventIds };
 }
 
 /**
@@ -297,7 +311,7 @@ function hasEnded(time: EventTime, now: DateTime.Zoned): boolean {
  * The Copy's Google event id (ADR 0002). Sync Rule ids are hex, and hex is a
  * subset of the alphabet Google allows in event ids (lowercase a to v and
  * digits), so the id is the Sync Rule id followed by the hex of the source
- * event id.
+ * event id. It exceeds Google's limit for source event ids over 496 characters.
  */
 function copyId(syncRuleId: string, sourceEventId: string): string {
   return syncRuleId + Hex.encode(sourceEventId);

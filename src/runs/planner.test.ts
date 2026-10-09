@@ -78,7 +78,7 @@ function copiesOf(
     sourceEvents,
     target: targetListing([]),
     now: weekEarlier,
-  })) {
+  }).operations) {
     if (operation.kind === "create") {
       copies.push(listedCopy(operation.copy));
     }
@@ -94,7 +94,7 @@ describe("planCopies", () => {
       sourceEvents: [sourceEvent("event1", tomorrowMorning)],
       target: targetListing([]),
       now,
-    });
+    }).operations;
 
     expect(operations).toEqual([
       {
@@ -122,7 +122,7 @@ describe("planCopies", () => {
       sourceEvents: [sourceEvent("event1", tomorrowMorning)],
       target: targetListing([]),
       now,
-    });
+    }).operations;
 
     expect(operations).toEqual([
       {
@@ -156,7 +156,7 @@ describe("planCopies", () => {
       ],
       target: targetListing([]),
       now,
-    });
+    }).operations;
 
     expect(operations).toEqual([
       {
@@ -183,7 +183,7 @@ describe("planCopies", () => {
       sourceEvents: [{ ...call, details: { ...call.details, visibility: "private" } }],
       target: targetListing([]),
       now,
-    });
+    }).operations;
 
     expect(operations).toEqual([
       {
@@ -199,7 +199,9 @@ describe("planCopies", () => {
     const tomorrow: EventTime = { kind: "allDay", startDate: "2026-10-10", endDate: "2026-10-11" };
     const sourceEvents = [sourceEvent("holiday1", tomorrow)];
 
-    expect(planCopies({ rule, sourceEvents, target: targetListing([]), now })).toEqual([]);
+    expect(planCopies({ rule, sourceEvents, target: targetListing([]), now }).operations).toEqual(
+      [],
+    );
 
     expect(
       planCopies({
@@ -207,7 +209,7 @@ describe("planCopies", () => {
         sourceEvents,
         target: targetListing([]),
         now,
-      }),
+      }).operations,
     ).toEqual([
       {
         kind: "create",
@@ -230,9 +232,9 @@ describe("planCopies", () => {
     const copies = copiesOf(sourceEvents, { ...rule, includeAllDayEvents: true });
     const allDayCopy = copies.find((copy) => copy.details.time.kind === "allDay");
 
-    expect(planCopies({ rule, sourceEvents, target: targetListing(copies), now })).toEqual([
-      { kind: "delete", copyId: allDayCopy!.id },
-    ]);
+    expect(
+      planCopies({ rule, sourceEvents, target: targetListing(copies), now }).operations,
+    ).toEqual([{ kind: "delete", copyId: allDayCopy!.id }]);
   });
 
   test("rewrites Copies when the rule's Mode or private title changes", () => {
@@ -266,7 +268,7 @@ describe("planCopies", () => {
       const [copy] = copiesOf(sourceEvents, before);
 
       expect(
-        planCopies({ rule: after, sourceEvents, target: targetListing([copy!]), now }),
+        planCopies({ rule: after, sourceEvents, target: targetListing([copy!]), now }).operations,
       ).toEqual([{ kind: "update", copy: expect.objectContaining({ id: copy!.id, details }) }]);
     }
   });
@@ -285,7 +287,7 @@ describe("planCopies", () => {
       ],
       target: targetListing([]),
       now,
-    });
+    }).operations;
 
     expect(operations).toEqual([
       {
@@ -315,7 +317,8 @@ describe("planCopies", () => {
     const sourceEvents = [sourceEvent("event1", tomorrowMorning)];
 
     expect(
-      planCopies({ rule, sourceEvents, target: targetListing(copiesOf(sourceEvents)), now }),
+      planCopies({ rule, sourceEvents, target: targetListing(copiesOf(sourceEvents)), now })
+        .operations,
     ).toEqual([]);
   });
 
@@ -328,7 +331,7 @@ describe("planCopies", () => {
       sourceEvents: [sourceEvent("event1", moved)],
       target: targetListing([copy!]),
       now,
-    });
+    }).operations;
 
     expect(operations).toEqual([
       {
@@ -353,7 +356,9 @@ describe("planCopies", () => {
     };
 
     for (const changed of [edited, withReminder, withConference]) {
-      expect(planCopies({ rule, sourceEvents, target: targetListing([changed]), now })).toEqual([
+      expect(
+        planCopies({ rule, sourceEvents, target: targetListing([changed]), now }).operations,
+      ).toEqual([
         { kind: "update", copy: expect.objectContaining({ id: copy!.id, details: copy!.details }) },
       ]);
     }
@@ -362,17 +367,17 @@ describe("planCopies", () => {
   test("deletes a Copy whose Source Event is gone", () => {
     const [copy] = copiesOf([sourceEvent("event1", tomorrowMorning)]);
 
-    expect(planCopies({ rule, sourceEvents: [], target: targetListing([copy!]), now })).toEqual([
-      { kind: "delete", copyId: copy!.id },
-    ]);
+    expect(
+      planCopies({ rule, sourceEvents: [], target: targetListing([copy!]), now }).operations,
+    ).toEqual([{ kind: "delete", copyId: copy!.id }]);
   });
 
   test("never touches events the system didn't create", () => {
     const ownEvent = sourceEvent("own1", tomorrowMorning);
 
-    expect(planCopies({ rule, sourceEvents: [], target: targetListing([ownEvent]), now })).toEqual(
-      [],
-    );
+    expect(
+      planCopies({ rule, sourceEvents: [], target: targetListing([ownEvent]), now }).operations,
+    ).toEqual([]);
   });
 
   test("leaves other Sync Rules' Copies alone", () => {
@@ -382,7 +387,8 @@ describe("planCopies", () => {
     };
 
     expect(
-      planCopies({ rule, sourceEvents: [], target: targetListing([otherRuleCopy]), now }),
+      planCopies({ rule, sourceEvents: [], target: targetListing([otherRuleCopy]), now })
+        .operations,
     ).toEqual([]);
   });
 
@@ -400,7 +406,7 @@ describe("planCopies", () => {
         sourceEvents: [reverseRuleCopy, ownCopy],
         target: targetListing([]),
         now,
-      }),
+      }).operations,
     ).toEqual([]);
   });
 
@@ -417,7 +423,7 @@ describe("planCopies", () => {
       ],
       target: targetListing([endedCopy!, movedSourceCopy!]),
       now,
-    });
+    }).operations;
 
     expect(operations).toEqual([]);
   });
@@ -428,9 +434,9 @@ describe("planCopies", () => {
       ownerResponse: "declined",
     };
 
-    expect(planCopies({ rule, sourceEvents: [declined], target: targetListing([]), now })).toEqual(
-      [],
-    );
+    expect(
+      planCopies({ rule, sourceEvents: [declined], target: targetListing([]), now }).operations,
+    ).toEqual([]);
   });
 
   test("copies tentative and unanswered invitations", () => {
@@ -445,7 +451,8 @@ describe("planCopies", () => {
     };
 
     expect(
-      planCopies({ rule, sourceEvents: [tentative, unanswered], target: targetListing([]), now }),
+      planCopies({ rule, sourceEvents: [tentative, unanswered], target: targetListing([]), now })
+        .operations,
     ).toEqual([
       { kind: "create", copy: expect.objectContaining({ sourceEventId: "event1" }) },
       { kind: "create", copy: expect.objectContaining({ sourceEventId: "event2" }) },
@@ -456,7 +463,9 @@ describe("planCopies", () => {
     const source = sourceEvent("event1", tomorrowMorning);
     const free: CalendarEvent = { ...source, details: { ...source.details, busy: false } };
 
-    expect(planCopies({ rule, sourceEvents: [free], target: targetListing([]), now })).toEqual([]);
+    expect(
+      planCopies({ rule, sourceEvents: [free], target: targetListing([]), now }).operations,
+    ).toEqual([]);
   });
 
   test("copies out-of-office and focus-time events as busy Copies", () => {
@@ -473,7 +482,8 @@ describe("planCopies", () => {
     const busyCopy = expect.objectContaining({ details: expect.objectContaining({ busy: true }) });
 
     expect(
-      planCopies({ rule, sourceEvents: [outOfOffice, focusTime], target: targetListing([]), now }),
+      planCopies({ rule, sourceEvents: [outOfOffice, focusTime], target: targetListing([]), now })
+        .operations,
     ).toEqual([
       { kind: "create", copy: busyCopy },
       { kind: "create", copy: busyCopy },
@@ -487,7 +497,8 @@ describe("planCopies", () => {
     };
 
     expect(
-      planCopies({ rule, sourceEvents: [workingLocation], target: targetListing([]), now }),
+      planCopies({ rule, sourceEvents: [workingLocation], target: targetListing([]), now })
+        .operations,
     ).toEqual([]);
   });
 
@@ -510,7 +521,7 @@ describe("planCopies", () => {
         sourceEvents: [sourceInvitation],
         target: targetListing([targetInvitation]),
         now,
-      }),
+      }).operations,
     ).toEqual([]);
   });
 
@@ -533,7 +544,7 @@ describe("planCopies", () => {
         sourceEvents: [sourceInvitation],
         target: targetListing([declinedInTarget]),
         now,
-      }),
+      }).operations,
     ).toEqual([
       { kind: "create", copy: expect.objectContaining({ sourceEventId: "sourceinvitation1" }) },
     ]);
@@ -553,7 +564,7 @@ describe("planCopies", () => {
         sourceEvents: [{ ...invitation, ownerResponse: "declined" }],
         target: targetListing([copy!]),
         now,
-      }),
+      }).operations,
     ).toEqual([{ kind: "delete", copyId: copy!.id }]);
   });
 
@@ -569,7 +580,7 @@ describe("planCopies", () => {
       ],
       target: targetListing([occurrence("target_20261010T090000Z", tomorrowMorning)]),
       now,
-    });
+    }).operations;
 
     expect(operations).toEqual([
       {
@@ -589,7 +600,8 @@ describe("planCopies", () => {
     const notYetMoved = occurrence("target_20261010T090000Z", tomorrowMorning);
 
     expect(
-      planCopies({ rule, sourceEvents: [moved], target: targetListing([notYetMoved]), now }),
+      planCopies({ rule, sourceEvents: [moved], target: targetListing([notYetMoved]), now })
+        .operations,
     ).toEqual([]);
   });
 
@@ -604,7 +616,7 @@ describe("planCopies", () => {
         sourceEvents: [sourceEvent("event1", thisMorning)],
         target: targetListing([copy!]),
         now,
-      }),
+      }).operations,
     ).toEqual([
       {
         kind: "update",

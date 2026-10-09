@@ -11,6 +11,14 @@ tuning.
 
 ## Consequences
 
+Google allows event ids of 5 to 1024 characters. A Copy id is the
+32-character Sync Rule id followed by two characters per character of the
+source event id, so a Source Event whose id is longer than 496 characters
+can't have a Copy. A Run skips such an event, writes the Sync Rule's other
+Copies, and fails the Sync Rule, which the dashboard shows. A shorter
+encoding for long ids would change existing Copy ids and so rewrite every
+Copy, which isn't worth it for ids this rare.
+
 Deleting a Copy doesn't free its id. Google keeps the event as `cancelled`,
 and inserting the same id again fails with the same 409 `duplicate` as for a live
 Copy. The listing a Run reads (`singleEvents=true`, default `showDeleted`)

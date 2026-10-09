@@ -219,7 +219,7 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
  * The Copy as Google lists it after storing it. Google gives an event
  * inserted without an iCalUID one made from its id.
  */
-function listedCopy(copy: Copy): CalendarEvent {
+export function listedCopy(copy: Copy): CalendarEvent {
   return {
     id: copy.id,
     iCalUID: `${copy.id}@google.com`,

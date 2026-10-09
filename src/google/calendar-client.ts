@@ -1,5 +1,11 @@
 import { Context, DateTime, Effect, Layer, type Redacted, Schema, type Types } from "effect";
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
+import {
+  FetchHttpClient,
+  HttpClient,
+  HttpClientRequest,
+  HttpClientResponse,
+  type UrlParams,
+} from "effect/http";
 
 import { accessRoles, type Calendar } from "./calendar";
 import {
@@ -191,46 +197,65 @@ export class GoogleCalendar extends Context.Service<
             Effect.mapError((cause) => new GoogleCalendarUnavailable({ calendarAccountId, cause })),
           );
 
+      /**
+       * Every page of a listing. Google may return a short or empty page
+       * before the last one, so only a missing nextPageToken ends the list.
+       */
+      const listPages = <Page extends { readonly nextPageToken?: string }>(
+        calendarAccountId: string,
+        url: string,
+        urlParams: UrlParams.Input,
+        pageSchema: Schema.ConstraintDecoder<Page>,
+      ): Effect.Effect<ReadonlyArray<Page>, GoogleCalendarError> =>
+        Effect.gen(function* () {
+          const accessToken = yield* accessTokens.forAccount(calendarAccountId);
+          const pages: Array<Page> = [];
+          let pageToken: string | undefined;
+
+          do {
+            const request = HttpClientRequest.get(url).pipe(
+              HttpClientRequest.bearerToken(accessToken),
+              HttpClientRequest.acceptJson,
+              HttpClientRequest.setUrlParams(urlParams),
+              HttpClientRequest.setUrlParams({ pageToken }),
+            );
+
+            const response = yield* send(calendarAccountId, request);
+
+            if (response.status !== 200) {
+              return yield* rejectStatus(calendarAccountId, response);
+            }
+
+            const page = yield* HttpClientResponse.schemaBodyJson(pageSchema)(response).pipe(
+              Effect.mapError(
+                (cause) => new GoogleCalendarUnavailable({ calendarAccountId, cause }),
+              ),
+            );
+
+            pages.push(page);
+            pageToken = page.nextPageToken;
+          } while (pageToken !== undefined);
+
+          return pages;
+        });
+
       const listCalendars = Effect.fn("GoogleCalendar.listCalendars")(function* (
         calendarAccountId: string,
       ) {
-        const accessToken = yield* accessTokens.forAccount(calendarAccountId);
-        const calendars: Array<Calendar> = [];
-        let pageToken: string | undefined;
+        const pages = yield* listPages(
+          calendarAccountId,
+          "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+          { showHidden: true, maxResults: 250 },
+          CalendarListPage,
+        );
 
-        // Google may return a short or empty page before the last one, so only
-        // a missing nextPageToken ends the list.
-        do {
-          const request = HttpClientRequest.get(
-            "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-          ).pipe(
-            HttpClientRequest.bearerToken(accessToken),
-            HttpClientRequest.acceptJson,
-            HttpClientRequest.setUrlParams({ showHidden: true, maxResults: 250, pageToken }),
-          );
-
-          const response = yield* send(calendarAccountId, request);
-
-          if (response.status !== 200) {
-            return yield* rejectStatus(calendarAccountId, response);
-          }
-
-          const page = yield* HttpClientResponse.schemaBodyJson(CalendarListPage)(response).pipe(
-            Effect.mapError((cause) => new GoogleCalendarUnavailable({ calendarAccountId, cause })),
-          );
-
-          for (const entry of page.items ?? []) {
-            calendars.push({
-              id: entry.id,
-              name: entry.summaryOverride ?? entry.summary,
-              accessRole: entry.accessRole,
-            });
-          }
-
-          pageToken = page.nextPageToken;
-        } while (pageToken !== undefined);
-
-        return calendars;
+        return pages.flatMap((page) =>
+          (page.items ?? []).map((entry): Calendar => ({
+            id: entry.id,
+            name: entry.summaryOverride ?? entry.summary,
+            accessRole: entry.accessRole,
+          })),
+        );
       });
 
       const listEvents = Effect.fn("GoogleCalendar.listEvents")(function* (
@@ -238,44 +263,25 @@ export class GoogleCalendar extends Context.Service<
         calendarId: string,
         window: SyncWindow,
       ) {
-        const accessToken = yield* accessTokens.forAccount(calendarAccountId);
+        const pages = yield* listPages(
+          calendarAccountId,
+          eventsUrl(calendarId),
+          {
+            singleEvents: true,
+            timeMin: DateTime.formatIso(window.start),
+            timeMax: DateTime.formatIso(window.end),
+            maxResults: 2500,
+          },
+          EventsPage,
+        );
+
         const events: Array<CalendarEvent> = [];
-        let pageToken: string | undefined;
 
-        // As with Calendars, only a missing nextPageToken ends the list.
-        do {
-          const request = HttpClientRequest.get(eventsUrl(calendarId)).pipe(
-            HttpClientRequest.bearerToken(accessToken),
-            HttpClientRequest.acceptJson,
-            HttpClientRequest.setUrlParams({
-              singleEvents: true,
-              timeMin: DateTime.formatIso(window.start),
-              timeMax: DateTime.formatIso(window.end),
-              maxResults: 2500,
-              pageToken,
-            }),
-          );
-
-          const response = yield* send(calendarAccountId, request);
-
-          if (response.status !== 200) {
-            return yield* rejectStatus(calendarAccountId, response);
-          }
-
-          const page = yield* HttpClientResponse.schemaBodyJson(EventsPage)(response).pipe(
-            Effect.mapError((cause) => new GoogleCalendarUnavailable({ calendarAccountId, cause })),
-          );
-
-          for (const item of page.items ?? []) {
-            if (item.status === "cancelled") {
-              continue;
-            }
-
+        for (const item of pages.flatMap((page) => page.items ?? [])) {
+          if (item.status !== "cancelled") {
             events.push(yield* calendarEventOf(calendarAccountId, item));
           }
-
-          pageToken = page.nextPageToken;
-        } while (pageToken !== undefined);
+        }
 
         return events;
       });

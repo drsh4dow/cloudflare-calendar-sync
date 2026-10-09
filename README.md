@@ -165,7 +165,8 @@ bun run dev
 This serves stage `dev` on `http://localhost:1337`, with a local database
 under `.alchemy/` and no Cloudflare resources. It still calls the real Google
 APIs, so Sync Rules you create in `dev` write real Copies into your
-Calendars. Delete them before you stop using `dev`.
+Calendars. Delete those Sync Rules in `dev` before you stop using it, which
+also deletes their Copies.
 
 The cron doesn't fire locally. Start a scheduled Run with:
 
@@ -187,8 +188,8 @@ against `prod`.
    tokens, and the secrets.
 
 Disconnecting a Calendar Account also deletes the Copies its Calendars
-produced in other accounts that haven't ended. Copies inside the disconnected
-account stay for you to delete.
+produced in other accounts, except those that have ended. Copies inside the
+disconnected account stay for you to delete.
 
 ## Commands
 

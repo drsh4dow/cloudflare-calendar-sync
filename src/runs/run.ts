@@ -68,13 +68,19 @@ export const run = Effect.gen(function* () {
 
     // A Sync Rule is planned only from complete listings of both Calendars,
     // so a failed read never looks like deleted Source Events.
-    const sourceEvents = yield* Cache.get(listings, {
+    const source = yield* Cache.get(listings, {
       calendarAccountId: rule.sourceCalendarAccountId,
       calendarId: rule.sourceCalendarId,
     });
 
-    const targetEvents = yield* Cache.get(listings, target);
-    const operations = planCopies({ rule, sourceEvents, targetEvents, now });
+    const targetListing = yield* Cache.get(listings, target);
+
+    const operations = planCopies({
+      rule,
+      sourceEvents: source.events,
+      target: targetListing,
+      now,
+    });
 
     yield* applyCopyOperations(target, operations);
     yield* Effect.logInfo("Sync Rule applied", { syncRuleId: rule.id, writes: operations.length });

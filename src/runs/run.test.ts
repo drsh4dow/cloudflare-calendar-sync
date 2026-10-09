@@ -147,6 +147,32 @@ describe("run", () => {
     expect(google.writes()).toBe(writesAfterFirstRun);
   });
 
+  test("turning all-day events off removes an all-day Copy whose day hasn't ended in the Target Calendar's time zone", async () => {
+    const google = newGoogleCalendar();
+    const withAllDay: SyncRule = { ...personalToWork, includeAllDayEvents: true };
+    const october9: EventTime = { kind: "allDay", startDate: "2026-10-09", endDate: "2026-10-10" };
+
+    google.setTimeZone(personalCalendar, "America/Santiago");
+    google.setTimeZone(workCalendar, "America/Santiago");
+    google.putEvent(personalCalendar, meeting("holiday", october9));
+
+    const program = Effect.gen(function* () {
+      yield* TestClock.setTime(Date.parse("2026-10-09T15:00:00Z"));
+      yield* run.pipe(Effect.provide(storeSyncRules([withAllDay]).layer));
+      // 22:00 on October 9 in Santiago, already October 10 in UTC.
+      yield* TestClock.setTime(Date.parse("2026-10-10T01:00:00Z"));
+      yield* run.pipe(Effect.provide(storeSyncRules([personalToWork]).layer));
+    });
+
+    await Effect.runPromise(
+      program.pipe(
+        Effect.provide(Layer.mergeAll(google.layer, runStatusLayer([]), TestClock.layer())),
+      ),
+    );
+
+    expect(google.events(workCalendar)).toEqual([]);
+  });
+
   test("overlapping Runs leave one Copy per Source Event", async () => {
     const google = newGoogleCalendar();
 

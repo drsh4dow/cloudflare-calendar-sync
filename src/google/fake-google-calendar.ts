@@ -21,6 +21,8 @@ export type FakeGoogleCalendar = {
   putEvent(calendarId: string, event: CalendarEvent): void;
   /** Deletes an event, as the Owner would in Google Calendar. */
   deleteEvent(calendarId: string, eventId: string): void;
+  /** Sets the Calendar's time zone, which is UTC until set, as the Owner would in its settings. */
+  setTimeZone(calendarId: string, timeZone: string): void;
   /** Makes every later listing of the Calendar fail, as when one of its pages fails. */
   failReads(calendarId: string): void;
   /** Refuses every later request of the Calendar Account, as when the Owner revokes its grant. */
@@ -44,6 +46,7 @@ type StoredEvent = { readonly event: CalendarEvent; readonly deleted: boolean };
  */
 export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): FakeGoogleCalendar {
   const calendars = new Map<string, Map<string, StoredEvent>>();
+  const timeZones = new Map<string, DateTime.TimeZone>();
   const failingReads = new Set<string>();
   const revokedGrants = new Set<string>();
   let writes = 0;
@@ -72,6 +75,10 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
     if (stored !== undefined) {
       calendar(calendarId).set(eventId, { event: stored.event, deleted: true });
     }
+  }
+
+  function timeZoneOf(calendarId: string): DateTime.TimeZone {
+    return timeZones.get(calendarId) ?? DateTime.zoneMakeNamedUnsafe("UTC");
   }
 
   function events(calendarId: string): ReadonlyArray<CalendarEvent> {
@@ -158,7 +165,14 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
           });
         }
 
-        return events(calendarId).filter((event) => overlaps(event.details.time, window));
+        const timeZone = timeZoneOf(calendarId);
+
+        return {
+          timeZone,
+          events: events(calendarId).filter((event) =>
+            overlaps(event.details.time, timeZone, window),
+          ),
+        };
       }),
       insertCopy: Effect.fnUntraced(function* (
         calendarAccountId: string,
@@ -201,6 +215,9 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
     layer,
     putEvent,
     deleteEvent,
+    setTimeZone: (calendarId, timeZone) => {
+      timeZones.set(calendarId, DateTime.zoneMakeNamedUnsafe(timeZone));
+    },
     failReads: (calendarId) => {
       failingReads.add(calendarId);
     },
@@ -231,19 +248,25 @@ export function listedCopy(copy: Copy): CalendarEvent {
   };
 }
 
-/** Whether the event overlaps the window, which is how Google's listing selects events. */
-function overlaps(time: EventTime, window: SyncWindow): boolean {
+/**
+ * Whether the event overlaps the window, which is how Google's listing
+ * selects events. All-day events span their dates in the Calendar's time zone.
+ */
+function overlaps(time: EventTime, timeZone: DateTime.TimeZone, window: SyncWindow): boolean {
+  const { start, end } = instantsOf(time, timeZone);
+
+  return DateTime.isGreaterThan(end, window.start) && DateTime.isLessThan(start, window.end);
+}
+
+function instantsOf(time: EventTime, timeZone: DateTime.TimeZone) {
   switch (time.kind) {
     case "timed":
-      return (
-        DateTime.isGreaterThan(time.end, window.start) &&
-        DateTime.isLessThan(time.start, window.end)
-      );
+      return time;
     case "allDay":
-      return (
-        time.endDate > DateTime.formatIsoDate(window.start) &&
-        time.startDate < DateTime.formatIsoDate(window.end)
-      );
+      return {
+        start: DateTime.makeZonedUnsafe(time.startDate, { timeZone, adjustForTimeZone: true }),
+        end: DateTime.makeZonedUnsafe(time.endDate, { timeZone, adjustForTimeZone: true }),
+      };
     default: {
       const exhaustive: never = time;
 

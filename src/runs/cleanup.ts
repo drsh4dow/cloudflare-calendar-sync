@@ -4,7 +4,7 @@ import { GoogleCalendar } from "@/google/calendar-client";
 import type { SyncRule } from "@/sync-rules/sync-rule";
 import { SyncRules } from "@/sync-rules/sync-rules.server";
 import { planCopies, syncWindowAt } from "./planner";
-import { applyCopyOperation, type CalendarRef } from "./run";
+import { applyCopyOperations, type CalendarRef } from "./run";
 
 /**
  * Deletes the Sync Rule's Copies that haven't ended, then the Sync Rule. A
@@ -69,11 +69,7 @@ const deleteWithCopies = Effect.fn("deleteWithCopies")(function* (rule: SyncRule
   // Without Source Events, every Copy of the rule that hasn't ended is stale.
   const operations = planCopies({ rule, sourceEvents: [], targetEvents, now });
 
-  yield* Effect.forEach(operations, (operation) => applyCopyOperation(target, operation), {
-    concurrency: 4,
-    discard: true,
-  });
-
+  yield* applyCopyOperations(target, operations);
   yield* syncRules.delete(rule.id);
   yield* Effect.logInfo("Sync Rule deleted", { syncRuleId: rule.id, writes: operations.length });
 });

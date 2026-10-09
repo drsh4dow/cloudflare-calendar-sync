@@ -5,9 +5,13 @@ id, encoded in Google's allowed alphabet (lowercase a to v and digits). A Run
 inserts each missing Copy under that id, and when the insert fails with 409
 `duplicate`, it updates the event under that id with the full Copy instead.
 Overlapping cron and manual Runs therefore write identical content to one
-event, and duplicates are impossible even when a Run crashes halfway. We chose
-this over a lease row in D1 because it needs no lock lifecycle or expiry
-tuning.
+event id, and a Run that crashes halfway leaves nothing a later Run would
+duplicate. This prevents duplicates as far as Google detects id collisions,
+which its [`events.insert` reference][insert] says it can't guarantee at
+creation time, so two inserts of one Copy at nearly the same moment might
+both succeed. Two overlapping Runs on `prod` left one Copy per Source Event
+(ticket #13). We chose this over a lease row in D1 because it needs no lock
+lifecycle or expiry tuning.
 
 ## Consequences
 
@@ -38,3 +42,5 @@ after the deletion's cleanup. D1 keeps the ids of deleted Sync Rules, and
 later Runs delete the Copies tagged with one of them in the Calendars they
 write. Copies tagged with a Sync Rule the instance never had, such as another
 stage's in the same Calendars, stay.
+
+[insert]: https://developers.google.com/workspace/calendar/api/v3/reference/events/insert

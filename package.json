@@ -4,9 +4,10 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "env -u npm_execpath -u npm_config_user_agent node node_modules/alchemy/bin/cli.js dev --stage dev",
-    "deploy": "env -u npm_execpath -u npm_config_user_agent node node_modules/alchemy/bin/cli.js deploy --stage prod",
-    "destroy": "env -u npm_execpath -u npm_config_user_agent node node_modules/alchemy/bin/cli.js destroy --stage prod",
+    "alchemy": "env -u npm_execpath -u npm_config_user_agent node node_modules/alchemy/bin/cli.js",
+    "dev": "bun run alchemy dev --stage dev",
+    "deploy": "bun run alchemy deploy --stage prod",
+    "destroy": "bun run alchemy destroy --stage prod",
     "generate-routes": "tsr generate"
   },
   "dependencies": {

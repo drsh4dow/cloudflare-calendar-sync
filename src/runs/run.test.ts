@@ -346,6 +346,40 @@ describe("deleting a Sync Rule", () => {
     expect(syncRules.rules()).toEqual([]);
   });
 
+  test("deletes its Copies beyond the Sync Window", async () => {
+    const google = newGoogleCalendar();
+    const syncRules = storeSyncRules([personalToWork]);
+    const services = Layer.mergeAll(google.layer, syncRules.layer, runStatusLayer([]));
+
+    google.putEvent(personalCalendar, meeting("meeting1", tomorrowAt(9)));
+    await Effect.runPromise(run.pipe(Effect.provide(services)));
+
+    // The Owner moves the Copy 90 days ahead in Google Calendar.
+    const [copy] = google.events(workCalendar);
+
+    const start = DateTime.makeUnsafe(Date.now()).pipe(
+      DateTime.startOf("day"),
+      DateTime.add({ days: 90, hours: 9 }),
+    );
+
+    const ninetyDaysAhead: EventTime = {
+      kind: "timed",
+      start,
+      end: DateTime.add(start, { hours: 1 }),
+    };
+
+    google.putEvent(workCalendar, {
+      ...copy!,
+      details: { ...copy!.details, time: ninetyDaysAhead },
+    });
+
+    await Effect.runPromise(
+      deleteSyncRuleWithCopies(personalToWork.id).pipe(Effect.provide(services)),
+    );
+
+    expect(google.events(workCalendar)).toEqual([]);
+  });
+
   test("keeps the Sync Rule when its Target Calendar can't be read, so deleting again can finish", async () => {
     const google = newGoogleCalendar();
     const syncRules = storeSyncRules([personalToWork]);

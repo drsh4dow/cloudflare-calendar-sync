@@ -32,7 +32,10 @@ export type PlanInput = {
   readonly rule: SyncRule;
   /** Every event a complete read of the Source Calendar returned. */
   readonly sourceEvents: ReadonlyArray<CalendarEvent>;
-  /** A complete read of the Target Calendar. */
+  /**
+   * A complete read of the Target Calendar. Without Source Events, a
+   * complete read of the rule's Copies in it is enough.
+   */
   readonly target: EventListing;
   readonly now: DateTime.Utc;
 };

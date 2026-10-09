@@ -3,7 +3,7 @@ import { DateTime, Effect } from "effect";
 import { GoogleCalendar } from "@/google/calendar-client";
 import type { SyncRule } from "@/sync-rules/sync-rule";
 import { SyncRules } from "@/sync-rules/sync-rules.server";
-import { planCopies, syncWindowAt } from "./planner";
+import { planCopies } from "./planner";
 import { applyCopyOperations, type CalendarRef } from "./run";
 
 /**
@@ -60,10 +60,13 @@ const deleteWithCopies = Effect.fn("deleteWithCopies")(function* (rule: SyncRule
     calendarId: rule.targetCalendarId,
   };
 
-  const targetListing = yield* google.listEvents(
+  // The Owner may have moved a Copy beyond the Sync Window, so the listing
+  // has no upper bound.
+  const targetListing = yield* google.listCopies(
     target.calendarAccountId,
     target.calendarId,
-    syncWindowAt(now),
+    rule.id,
+    now,
   );
 
   // Without Source Events, every Copy of the rule that hasn't ended is stale.

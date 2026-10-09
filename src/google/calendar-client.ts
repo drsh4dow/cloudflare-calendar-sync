@@ -162,6 +162,16 @@ export class GoogleCalendar extends Context.Service<
       calendarId: string,
       window: SyncWindow,
     ): Effect.Effect<EventListing, GoogleCalendarError>;
+    /**
+     * Every Copy the Sync Rule wrote to the Calendar that ends after `from`,
+     * however far ahead it is. Succeeds only when Google returned every page.
+     */
+    listCopies(
+      calendarAccountId: string,
+      calendarId: string,
+      syncRuleId: string,
+      from: DateTime.Utc,
+    ): Effect.Effect<EventListing, GoogleCalendarError>;
     /** Writes a new event under the Copy's id, notifying nobody. */
     insertCopy(
       calendarAccountId: string,
@@ -263,23 +273,13 @@ export class GoogleCalendar extends Context.Service<
         );
       });
 
-      const listEvents = Effect.fn("GoogleCalendar.listEvents")(function* (
+      /** The Calendar's events that match the query, without deleted ones. */
+      const listEventsWhere = Effect.fnUntraced(function* (
         calendarAccountId: string,
         calendarId: string,
-        window: SyncWindow,
+        query: UrlParams.Input,
       ) {
-        const pages = yield* listPages(
-          calendarAccountId,
-          eventsUrl(calendarId),
-          {
-            singleEvents: true,
-            timeMin: DateTime.formatIso(window.start),
-            timeMax: DateTime.formatIso(window.end),
-            maxResults: 2500,
-          },
-          EventsPage,
-        );
-
+        const pages = yield* listPages(calendarAccountId, eventsUrl(calendarId), query, EventsPage);
         const events: Array<CalendarEvent> = [];
 
         for (const item of pages.flatMap((page) => page.items ?? [])) {
@@ -289,6 +289,35 @@ export class GoogleCalendar extends Context.Service<
         }
 
         return { timeZone: pages[0].timeZone, events };
+      });
+
+      const listEvents = Effect.fn("GoogleCalendar.listEvents")(function* (
+        calendarAccountId: string,
+        calendarId: string,
+        window: SyncWindow,
+      ) {
+        return yield* listEventsWhere(calendarAccountId, calendarId, {
+          singleEvents: true,
+          timeMin: DateTime.formatIso(window.start),
+          timeMax: DateTime.formatIso(window.end),
+          maxResults: 2500,
+        });
+      });
+
+      const listCopies = Effect.fn("GoogleCalendar.listCopies")(function* (
+        calendarAccountId: string,
+        calendarId: string,
+        syncRuleId: string,
+        from: DateTime.Utc,
+      ) {
+        // timeMin bounds the events' ends, and without timeMax nothing bounds
+        // their starts.
+        return yield* listEventsWhere(calendarAccountId, calendarId, {
+          singleEvents: true,
+          timeMin: DateTime.formatIso(from),
+          privateExtendedProperty: `${syncRuleIdTag}=${syncRuleId}`,
+          maxResults: 2500,
+        });
       });
 
       const insertCopy = Effect.fn("GoogleCalendar.insertCopy")(function* (
@@ -357,7 +386,14 @@ export class GoogleCalendar extends Context.Service<
         }
       });
 
-      return GoogleCalendar.of({ listCalendars, listEvents, insertCopy, updateCopy, deleteCopy });
+      return GoogleCalendar.of({
+        listCalendars,
+        listEvents,
+        listCopies,
+        insertCopy,
+        updateCopy,
+        deleteCopy,
+      });
     }),
   ).pipe(Layer.provide(FetchHttpClient.layer));
 }

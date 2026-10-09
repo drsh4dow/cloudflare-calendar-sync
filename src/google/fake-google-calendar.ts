@@ -123,6 +123,18 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
     }
   });
 
+  const startRead = Effect.fnUntraced(function* (calendarAccountId: string, calendarId: string) {
+    yield* Effect.yieldNow;
+    yield* requireAccess(calendarAccountId, calendarId, isReadable);
+
+    if (failingReads.has(calendarId)) {
+      yield* new GoogleCalendarUnavailable({
+        calendarAccountId,
+        cause: "A page of the listing failed",
+      });
+    }
+  });
+
   const startWrite = Effect.fnUntraced(function* (calendarAccountId: string, calendarId: string) {
     yield* Effect.yieldNow;
     yield* requireAccess(calendarAccountId, calendarId, isWritable);
@@ -155,15 +167,7 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
         calendarId: string,
         window: SyncWindow,
       ) {
-        yield* Effect.yieldNow;
-        yield* requireAccess(calendarAccountId, calendarId, isReadable);
-
-        if (failingReads.has(calendarId)) {
-          return yield* new GoogleCalendarUnavailable({
-            calendarAccountId,
-            cause: "A page of the listing failed",
-          });
-        }
+        yield* startRead(calendarAccountId, calendarId);
 
         const timeZone = timeZoneOf(calendarId);
 
@@ -171,6 +175,25 @@ export function makeFakeGoogleCalendar(access: ReadonlyArray<CalendarAccess>): F
           timeZone,
           events: events(calendarId).filter((event) =>
             overlaps(event.details.time, timeZone, window),
+          ),
+        };
+      }),
+      listCopies: Effect.fnUntraced(function* (
+        calendarAccountId: string,
+        calendarId: string,
+        syncRuleId: string,
+        from: DateTime.Utc,
+      ) {
+        yield* startRead(calendarAccountId, calendarId);
+
+        const timeZone = timeZoneOf(calendarId);
+
+        return {
+          timeZone,
+          events: events(calendarId).filter(
+            (event) =>
+              event.syncRuleId === syncRuleId &&
+              DateTime.isGreaterThan(instantsOf(event.details.time, timeZone).end, from),
           ),
         };
       }),

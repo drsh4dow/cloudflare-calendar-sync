@@ -248,21 +248,33 @@ describe("planCopies", () => {
     const transparent: SyncRule = { ...rule, mode: "transparent" };
     const retitled: SyncRule = { ...rule, privateTitle: "Busy" };
 
+    const transparentDetails = {
+      title: "Client call",
+      description: "Agenda\n\nhttps://meet.google.com/abc-defg-hij",
+      location: "Office",
+      time: tomorrowMorning,
+      visibility: "default",
+      busy: true,
+    };
+
+    const privateDetails = (title: string) => ({
+      title,
+      time: tomorrowMorning,
+      visibility: "private",
+      busy: true,
+    });
+
     const edits = [
-      { before: rule, after: transparent },
-      { before: transparent, after: rule },
-      { before: rule, after: retitled },
+      { before: rule, after: transparent, details: transparentDetails },
+      { before: transparent, after: rule, details: privateDetails("Blocked (Freelance)") },
+      { before: rule, after: retitled, details: privateDetails("Busy") },
     ];
 
-    for (const { before, after } of edits) {
-      const copies = copiesOf(sourceEvents, before);
-      const [expected] = copiesOf(sourceEvents, after);
+    for (const { before, after, details } of edits) {
+      const [copy] = copiesOf(sourceEvents, before);
 
-      expect(planCopies({ rule: after, sourceEvents, targetEvents: copies, now })).toEqual([
-        {
-          kind: "update",
-          copy: expect.objectContaining({ id: expected!.id, details: expected!.details }),
-        },
+      expect(planCopies({ rule: after, sourceEvents, targetEvents: [copy!], now })).toEqual([
+        { kind: "update", copy: expect.objectContaining({ id: copy!.id, details }) },
       ]);
     }
   });

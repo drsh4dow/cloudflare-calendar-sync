@@ -33,22 +33,6 @@ const personalToWork: SyncRule = {
   includeAllDayEvents: false,
 };
 
-const freelanceToWork: SyncRule = {
-  ...personalToWork,
-  id: "fedcba9876543210fedcba9876543210",
-  sourceCalendarAccountId: freelance,
-  sourceCalendarId: freelanceCalendar,
-};
-
-const workToPersonal: SyncRule = {
-  ...personalToWork,
-  id: "abcdef0123456789abcdef0123456789",
-  sourceCalendarAccountId: work,
-  sourceCalendarId: workCalendar,
-  targetCalendarAccountId: personal,
-  targetCalendarId: personalCalendar,
-};
-
 function newGoogleCalendar(): FakeGoogleCalendar {
   return makeFakeGoogleCalendar([
     { calendarAccountId: personal, calendarId: personalCalendar, accessRole: "owner" },
@@ -131,6 +115,13 @@ function meeting(id: string, time: EventTime): CalendarEvent {
 }
 
 describe("run", () => {
+  const freelanceToWork: SyncRule = {
+    ...personalToWork,
+    id: "fedcba9876543210fedcba9876543210",
+    sourceCalendarAccountId: freelance,
+    sourceCalendarId: freelanceCalendar,
+  };
+
   test("writes a private Copy of each Source Event, and a second Run writes nothing", async () => {
     const google = newGoogleCalendar();
 
@@ -349,6 +340,15 @@ describe("deleting a Sync Rule", () => {
 
 describe("disconnecting a Calendar Account", () => {
   test("starts by deleting the Copies its Calendars produced in other accounts, leaving those inside it", async () => {
+    const workToPersonal: SyncRule = {
+      ...personalToWork,
+      id: "abcdef0123456789abcdef0123456789",
+      sourceCalendarAccountId: work,
+      sourceCalendarId: workCalendar,
+      targetCalendarAccountId: personal,
+      targetCalendarId: personalCalendar,
+    };
+
     const google = newGoogleCalendar();
     const syncRules = storeSyncRules([personalToWork, workToPersonal]);
     const services = Layer.mergeAll(google.layer, syncRules.layer, runStatusLayer([]));

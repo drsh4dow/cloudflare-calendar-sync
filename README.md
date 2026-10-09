@@ -132,7 +132,7 @@ If a deploy fails with "Cloudflare OAuth scopes need to be selected", the
 profile lists Cloudflare without a finished login. Log in again:
 
 ```sh
-bun run alchemy profile edit --reconfigure Cloudflare
+bun run alchemy profile refresh --provider Cloudflare
 ```
 
 ## Deploy
@@ -182,8 +182,9 @@ against `prod`.
 1. In the dashboard, delete every Sync Rule. Each deletion deletes the rule's
    Copies that haven't ended. The destroy command never calls Google, so
    Copies left at this point stay in your Calendars.
-2. Run `bun run destroy`. It deletes the Worker, the D1 database with the
-   stored OAuth tokens, and the secrets.
+2. Run `bun run destroy` and choose **Destroy** at the prompt, which defaults
+   to **Cancel**. It deletes the Worker, the D1 database with the stored OAuth
+   tokens, and the secrets.
 
 Disconnecting a Calendar Account also deletes the Copies its Calendars
 produced in other accounts that haven't ended. Copies inside the disconnected

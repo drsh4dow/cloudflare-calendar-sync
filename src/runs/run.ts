@@ -7,7 +7,7 @@ import {
 } from "@/google/calendar-client";
 import type { SyncRule } from "@/sync-rules/sync-rule";
 import { SyncRules } from "@/sync-rules/sync-rules.server";
-import { type CopyOperation, planCopies, syncWindowAt } from "./planner";
+import { type CopyOperation, planCopies, planOrphanDeletions, syncWindowAt } from "./planner";
 import type { CalendarAccountProblem } from "./run-status";
 import { type RunReport, RunStatusStore } from "./run-status.server";
 
@@ -51,6 +51,20 @@ export const run = Effect.gen(function* () {
   const now = yield* DateTime.now;
   const window = syncWindowAt(now);
   const rules = yield* syncRules.list;
+  // A deleted Sync Rule never comes back, so reading the deleted ids before
+  // the listings is safe: a later Run collects the Copies of a rule deleted
+  // after this point.
+  const deletedSyncRuleIds = new Set(yield* syncRules.deletedIds);
+
+  // The first Sync Rule that writes a Calendar deletes its orphan Copies, so
+  // each is deleted once.
+  const orphanCollectors = new Map<string, string>();
+
+  for (const rule of rules) {
+    if (!orphanCollectors.has(rule.targetCalendarId)) {
+      orphanCollectors.set(rule.targetCalendarId, rule.id);
+    }
+  }
 
   // Lists each Calendar once, however many Sync Rules read or write it. A
   // failed listing is kept too, so no Run lists a Calendar twice.
@@ -82,8 +96,19 @@ export const run = Effect.gen(function* () {
       now,
     });
 
-    yield* applyCopyOperations(target, operations);
-    yield* Effect.logInfo("Sync Rule applied", { syncRuleId: rule.id, writes: operations.length });
+    let orphanDeletions: ReadonlyArray<CopyOperation> = [];
+
+    if (orphanCollectors.get(rule.targetCalendarId) === rule.id) {
+      orphanDeletions = planOrphanDeletions(targetListing, deletedSyncRuleIds, now);
+    }
+
+    yield* applyCopyOperations(target, [...operations, ...orphanDeletions]);
+
+    yield* Effect.logInfo("Sync Rule applied", {
+      syncRuleId: rule.id,
+      writes: operations.length,
+      orphanCopiesDeleted: orphanDeletions.length,
+    });
   });
 
   const applySyncRule = (rule: SyncRule) =>

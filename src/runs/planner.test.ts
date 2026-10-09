@@ -4,7 +4,7 @@ import { describe, expect, test } from "vite-plus/test";
 import type { CalendarEvent, EventListing, EventTime } from "@/google/calendar-event";
 import { listedCopy } from "@/google/fake-google-calendar";
 import type { SyncRule } from "@/sync-rules/sync-rule";
-import { planCopies } from "./planner";
+import { planCopies, planOrphanDeletions } from "./planner";
 
 const now = DateTime.makeUnsafe("2026-10-09T12:00:00Z");
 
@@ -611,5 +611,20 @@ describe("planCopies", () => {
         copy: expect.objectContaining({ details: expect.objectContaining({ time: thisMorning }) }),
       },
     ]);
+  });
+});
+
+describe("planOrphanDeletions", () => {
+  test("never touches an orphan Copy that has ended", () => {
+    const thisMorning = timed("2026-10-09T09:00:00Z", "2026-10-09T10:00:00Z");
+
+    const [ended, running] = copiesOf([
+      sourceEvent("event1", thisMorning),
+      sourceEvent("event2", tomorrowMorning),
+    ]);
+
+    expect(planOrphanDeletions(targetListing([ended!, running!]), new Set([rule.id]), now)).toEqual(
+      [{ kind: "delete", copyId: running!.id }],
+    );
   });
 });

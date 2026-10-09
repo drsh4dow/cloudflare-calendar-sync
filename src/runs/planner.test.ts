@@ -1,7 +1,8 @@
 import { DateTime } from "effect";
 import { describe, expect, test } from "vite-plus/test";
 
-import type { CalendarEvent, Copy, EventTime } from "@/google/calendar-event";
+import type { CalendarEvent, EventTime } from "@/google/calendar-event";
+import { listedCopy } from "@/google/fake-google-calendar";
 import type { SyncRule } from "@/sync-rules/sync-rule";
 import { planCopies } from "./planner";
 
@@ -56,20 +57,6 @@ function occurrence(id: string, scheduled: EventTime, time: EventTime = schedule
   };
 }
 
-/** The Copy as the Target Calendar's listing returns it after a Run wrote it. */
-function listed(copy: Copy): CalendarEvent {
-  return {
-    id: copy.id,
-    iCalUID: `${copy.id}@google.com`,
-    eventType: "default",
-
-    syncRuleId: copy.syncRuleId,
-    details: copy.details,
-    hasReminders: false,
-    hasAttendees: false,
-  };
-}
-
 /**
  * The Copies a Run a week earlier wrote for the Source Events, as the Target
  * Calendar lists them.
@@ -88,7 +75,7 @@ function copiesOf(
     now: weekEarlier,
   })) {
     if (operation.kind === "create") {
-      copies.push(listed(operation.copy));
+      copies.push(listedCopy(operation.copy));
     }
   }
 

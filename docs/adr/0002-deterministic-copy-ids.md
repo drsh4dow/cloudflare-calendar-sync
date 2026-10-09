@@ -24,3 +24,9 @@ real API on 2026-10-08 (ticket #6).
 
 A Run working from an older listing can restore a Copy that an overlapping Run
 just deleted. The next Run deletes it again.
+
+A Run that loaded a Sync Rule before its deletion can write the rule's Copies
+after the deletion's cleanup. D1 keeps the ids of deleted Sync Rules, and
+later Runs delete the Copies tagged with one of them in the Calendars they
+write. Copies tagged with a Sync Rule the instance never had, such as another
+stage's in the same Calendars, stay.

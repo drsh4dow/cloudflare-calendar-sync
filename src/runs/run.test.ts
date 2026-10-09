@@ -50,15 +50,21 @@ type StoredSyncRules = {
 /** Sync Rules kept in memory, standing in for D1. */
 function storeSyncRules(initial: ReadonlyArray<SyncRule>): StoredSyncRules {
   let rules = initial;
+  const deletedIds: Array<string> = [];
 
   const layer = Layer.succeed(
     SyncRules,
     SyncRules.of({
       list: Effect.sync(() => rules),
+      deletedIds: Effect.sync(() => deletedIds),
       create: () => Effect.die("Runs and cleanup don't create Sync Rules"),
       update: () => Effect.die("Runs and cleanup don't update Sync Rules"),
       delete: (id) =>
         Effect.sync(() => {
+          if (rules.some((rule) => rule.id === id)) {
+            deletedIds.push(id);
+          }
+
           rules = rules.filter((rule) => rule.id !== id);
         }),
     }),
@@ -171,6 +177,40 @@ describe("run", () => {
     );
 
     expect(google.events(workCalendar)).toEqual([]);
+  });
+
+  test("deletes the Copies of a deleted Sync Rule that an overlapping Run wrote after its cleanup", async () => {
+    const google = newGoogleCalendar();
+    const syncRules = storeSyncRules([personalToWork, freelanceToWork]);
+    const services = Layer.mergeAll(google.layer, syncRules.layer, runStatusLayer([]));
+    const standup = meeting("standup", tomorrowAt(11));
+
+    // Written by another instance, such as the dev stage, whose Sync Rules
+    // this one never had.
+    const anotherInstancesCopy: CalendarEvent = {
+      ...meeting("another-instances-copy", tomorrowAt(13)),
+      syncRuleId: "00000000000000000000000000000000",
+    };
+
+    google.putEvent(personalCalendar, meeting("dentist", tomorrowAt(9)));
+    google.putEvent(freelanceCalendar, meeting("gig", tomorrowAt(15)));
+    google.putEvent(workCalendar, standup);
+    google.putEvent(workCalendar, anotherInstancesCopy);
+    await Effect.runPromise(run.pipe(Effect.provide(services)));
+
+    // The rule is gone, but its Copies remain, as when a Run that loaded it
+    // earlier wrote them after the cleanup listed the Target Calendar.
+    await Effect.runPromise(
+      SyncRules.use((rules) => rules.delete(freelanceToWork.id)).pipe(Effect.provide(services)),
+    );
+
+    await Effect.runPromise(run.pipe(Effect.provide(services)));
+
+    expect(google.events(workCalendar)).toEqual([
+      standup,
+      anotherInstancesCopy,
+      expect.objectContaining({ syncRuleId: personalToWork.id }),
+    ]);
   });
 
   test("overlapping Runs leave one Copy per Source Event", async () => {

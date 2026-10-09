@@ -1,3 +1,4 @@
+import { D1Client } from "@effect/sql-d1";
 import { Context, Effect, Layer, Schema } from "effect";
 import { SqlClient, type SqlError, SqlSchema } from "effect/sql";
 
@@ -26,12 +27,18 @@ export class SyncRules extends Context.Service<
     /** Every Sync Rule, oldest first. */
     readonly list: Effect.Effect<ReadonlyArray<SyncRule>, SyncRulesError>;
     /**
+     * The id of every Sync Rule `delete` removed. Sync Rules that go with
+     * their Calendar Account's row aren't among them.
+     */
+    readonly deletedIds: Effect.Effect<ReadonlyArray<string>, SyncRulesError>;
+    /**
      * Stores the Sync Rules in one statement, so either all of them exist
      * afterwards or none. A rule whose Source and Target Calendars already
      * have a Sync Rule is skipped, which keeps a repeated request harmless.
      */
     create(rules: ReadonlyArray<NewSyncRule>): Effect.Effect<void, SyncRulesError>;
     update(id: string, settings: SyncRuleSettings): Effect.Effect<void, SyncRulesError>;
+    /** Deletes the Sync Rule and keeps its id among the deleted ones. */
     delete(id: string): Effect.Effect<void, SqlError.SqlError>;
   }
 >()("calendar-sync/SyncRules") {
@@ -39,6 +46,7 @@ export class SyncRules extends Context.Service<
     SyncRules,
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
+      const d1 = yield* D1Client.D1Client;
 
       const list = SqlSchema.findAll({
         Request: Schema.Void,
@@ -50,6 +58,12 @@ export class SyncRules extends Context.Service<
           ORDER BY "createdAt", "id"
         `,
       })(undefined);
+
+      const deletedIds = SqlSchema.findAll({
+        Request: Schema.Void,
+        Result: Schema.Struct({ id: Schema.String }),
+        execute: () => sql`SELECT "id" FROM "deletedSyncRule"`,
+      })(undefined).pipe(Effect.map((rows) => rows.map((row) => row.id)));
 
       const insert = SqlSchema.void({
         Request: Schema.Array(SyncRuleRow),
@@ -73,10 +87,20 @@ export class SyncRules extends Context.Service<
 
       const update = (id: string, settings: SyncRuleSettings) => updateSettings({ id, settings });
 
+      // One atomic batch, so a Sync Rule is never gone without its id kept,
+      // nor kept as deleted while it still exists.
       const remove = (id: string) =>
-        sql`DELETE FROM "syncRule" WHERE "id" = ${id}`.pipe(Effect.asVoid);
+        d1
+          .batch([
+            d1`
+              INSERT OR IGNORE INTO "deletedSyncRule" ("id")
+              SELECT "id" FROM "syncRule" WHERE "id" = ${id}
+            `,
+            d1`DELETE FROM "syncRule" WHERE "id" = ${id}`,
+          ])
+          .pipe(Effect.asVoid);
 
-      return SyncRules.of({ list, create, update, delete: remove });
+      return SyncRules.of({ list, deletedIds, create, update, delete: remove });
     }),
   );
 }

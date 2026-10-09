@@ -104,6 +104,32 @@ export function planCopies({
 }
 
 /**
+ * The deletes for the Copies in the Target Calendar whose Sync Rule was
+ * deleted, which a Run that loaded the rule before can write after the
+ * rule's cleanup. Copies that have ended are left as they are, and so are
+ * Copies of Sync Rules that aren't among the deleted ones, such as another
+ * instance's.
+ */
+export function planOrphanDeletions(
+  target: EventListing,
+  deletedSyncRuleIds: ReadonlySet<string>,
+  now: DateTime.Utc,
+): ReadonlyArray<CopyOperation> {
+  const nowInTarget = DateTime.setZone(now, target.timeZone);
+  const operations: Array<CopyOperation> = [];
+
+  for (const event of target.events) {
+    const orphaned = event.syncRuleId !== undefined && deletedSyncRuleIds.has(event.syncRuleId);
+
+    if (orphaned && !hasEnded(event.details.time, nowInTarget)) {
+      operations.push({ kind: "delete", copyId: event.id });
+    }
+  }
+
+  return operations;
+}
+
+/**
  * Whether a Run copies the event. Only Source Events are copied, so Copies
  * never chain, and all-day ones only when the rule includes them. Events
  * marked free, events the Owner declined, and working-location events don't

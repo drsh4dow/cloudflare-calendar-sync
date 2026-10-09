@@ -78,6 +78,13 @@ export type CalendarEvent = {
   readonly hasAttendees: boolean;
 };
 
+/** A Calendar's events as one listing returned them. */
+export type EventListing = {
+  /** The Calendar's time zone, in which the dates of its all-day events fall. */
+  readonly timeZone: DateTime.TimeZone;
+  readonly events: ReadonlyArray<CalendarEvent>;
+};
+
 /**
  * What a Copy shows. A Copy never has a conference of its own, so writing it
  * can't create one; Transparent Mode shows the link in the description.

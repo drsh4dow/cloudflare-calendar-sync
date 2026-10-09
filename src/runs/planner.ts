@@ -6,6 +6,7 @@ import type {
   Copy,
   CopyDetails,
   EventDetails,
+  EventListing,
   EventTime,
   SyncWindow,
 } from "@/google/calendar-event";
@@ -31,8 +32,8 @@ export type PlanInput = {
   readonly rule: SyncRule;
   /** Every event a complete read of the Source Calendar returned. */
   readonly sourceEvents: ReadonlyArray<CalendarEvent>;
-  /** Every event a complete read of the Target Calendar returned. */
-  readonly targetEvents: ReadonlyArray<CalendarEvent>;
+  /** A complete read of the Target Calendar. */
+  readonly target: EventListing;
   readonly now: DateTime.Utc;
 };
 
@@ -53,13 +54,15 @@ export type PlanInput = {
 export function planCopies({
   rule,
   sourceEvents,
-  targetEvents,
+  target,
   now,
 }: PlanInput): ReadonlyArray<CopyOperation> {
+  // Copies live in the Target Calendar, so their all-day dates are in its time zone.
+  const nowInTarget = DateTime.setZone(now, target.timeZone);
   const unclaimedCopies = new Map<string, CalendarEvent>();
   const meetingsInTarget = new Set<string>();
 
-  for (const event of targetEvents) {
+  for (const event of target.events) {
     if (event.syncRuleId === rule.id) {
       unclaimedCopies.set(event.id, event);
     }
@@ -81,7 +84,7 @@ export function planCopies({
 
     unclaimedCopies.delete(copy.id);
 
-    const operation = reconcile(copy, existing, now);
+    const operation = reconcile(copy, existing, nowInTarget);
 
     if (operation !== undefined) {
       operations.push(operation);
@@ -89,7 +92,7 @@ export function planCopies({
   }
 
   for (const stale of unclaimedCopies.values()) {
-    if (!hasEnded(stale.details.time, now)) {
+    if (!hasEnded(stale.details.time, nowInTarget)) {
       operations.push({ kind: "delete", copyId: stale.id });
     }
   }
@@ -140,7 +143,7 @@ function meetingOccurrence(event: CalendarEvent): string {
 function reconcile(
   copy: Copy,
   existing: CalendarEvent | undefined,
-  now: DateTime.Utc,
+  now: DateTime.Zoned,
 ): CopyOperation | undefined {
   if (existing === undefined) {
     if (hasEnded(copy.details.time, now)) {
@@ -245,9 +248,9 @@ function withConferenceLink(
 
 /**
  * Whether the event is over. All-day dates are compared with today's date in
- * UTC, the time zone of the Sync Window.
+ * the time zone of `now`, which must be the event's Calendar's.
  */
-function hasEnded(time: EventTime, now: DateTime.Utc): boolean {
+function hasEnded(time: EventTime, now: DateTime.Zoned): boolean {
   switch (time.kind) {
     case "timed":
       return DateTime.isLessThanOrEqualTo(time.end, now);

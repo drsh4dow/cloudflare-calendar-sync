@@ -60,14 +60,14 @@ const deleteWithCopies = Effect.fn("deleteWithCopies")(function* (rule: SyncRule
     calendarId: rule.targetCalendarId,
   };
 
-  const targetEvents = yield* google.listEvents(
+  const targetListing = yield* google.listEvents(
     target.calendarAccountId,
     target.calendarId,
     syncWindowAt(now),
   );
 
   // Without Source Events, every Copy of the rule that hasn't ended is stale.
-  const operations = planCopies({ rule, sourceEvents: [], targetEvents, now });
+  const operations = planCopies({ rule, sourceEvents: [], target: targetListing, now });
 
   yield* applyCopyOperations(target, operations);
   yield* syncRules.delete(rule.id);

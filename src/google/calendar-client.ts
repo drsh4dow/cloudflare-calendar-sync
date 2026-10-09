@@ -11,6 +11,7 @@ import { accessRoles, type Calendar } from "./calendar";
 import {
   type CalendarEvent,
   type Copy,
+  type EventListing,
   type EventDetails,
   type EventStart,
   type EventTime,
@@ -131,6 +132,7 @@ const LiveEvent = Schema.Struct({
 type LiveEvent = typeof LiveEvent.Type;
 
 const EventsPage = Schema.Struct({
+  timeZone: Schema.TimeZoneNamedFromString,
   items: Schema.optionalKey(Schema.Array(Schema.Union([CancelledEvent, LiveEvent]))),
   nextPageToken: Schema.optionalKey(Schema.String),
 });
@@ -159,7 +161,7 @@ export class GoogleCalendar extends Context.Service<
       calendarAccountId: string,
       calendarId: string,
       window: SyncWindow,
-    ): Effect.Effect<ReadonlyArray<CalendarEvent>, GoogleCalendarError>;
+    ): Effect.Effect<EventListing, GoogleCalendarError>;
     /** Writes a new event under the Copy's id, notifying nobody. */
     insertCopy(
       calendarAccountId: string,
@@ -206,13 +208,11 @@ export class GoogleCalendar extends Context.Service<
         url: string,
         urlParams: UrlParams.Input,
         pageSchema: Schema.ConstraintDecoder<Page>,
-      ): Effect.Effect<ReadonlyArray<Page>, GoogleCalendarError> =>
+      ): Effect.Effect<readonly [Page, ...Array<Page>], GoogleCalendarError> =>
         Effect.gen(function* () {
           const accessToken = yield* accessTokens.forAccount(calendarAccountId);
-          const pages: Array<Page> = [];
-          let pageToken: string | undefined;
 
-          do {
+          const requestPage = Effect.fnUntraced(function* (pageToken: string | undefined) {
             const request = HttpClientRequest.get(url).pipe(
               HttpClientRequest.bearerToken(accessToken),
               HttpClientRequest.acceptJson,
@@ -226,15 +226,20 @@ export class GoogleCalendar extends Context.Service<
               return yield* rejectStatus(calendarAccountId, response);
             }
 
-            const page = yield* HttpClientResponse.schemaBodyJson(pageSchema)(response).pipe(
+            return yield* HttpClientResponse.schemaBodyJson(pageSchema)(response).pipe(
               Effect.mapError(
                 (cause) => new GoogleCalendarUnavailable({ calendarAccountId, cause }),
               ),
             );
+          });
 
+          let page = yield* requestPage(undefined);
+          const pages: [Page, ...Array<Page>] = [page];
+
+          while (page.nextPageToken !== undefined) {
+            page = yield* requestPage(page.nextPageToken);
             pages.push(page);
-            pageToken = page.nextPageToken;
-          } while (pageToken !== undefined);
+          }
 
           return pages;
         });
@@ -283,7 +288,7 @@ export class GoogleCalendar extends Context.Service<
           }
         }
 
-        return events;
+        return { timeZone: pages[0].timeZone, events };
       });
 
       const insertCopy = Effect.fn("GoogleCalendar.insertCopy")(function* (

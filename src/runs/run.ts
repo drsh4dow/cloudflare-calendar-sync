@@ -76,11 +76,7 @@ export const run = Effect.gen(function* () {
     const targetEvents = yield* Cache.get(listings, target);
     const operations = planCopies({ rule, sourceEvents, targetEvents, now });
 
-    yield* Effect.forEach(operations, (operation) => applyCopyOperation(target, operation), {
-      concurrency: 4,
-      discard: true,
-    });
-
+    yield* applyCopyOperations(target, operations);
     yield* Effect.logInfo("Sync Rule applied", { syncRuleId: rule.id, writes: operations.length });
   });
 
@@ -118,8 +114,19 @@ export const run = Effect.gen(function* () {
   }
 });
 
+/** Writes the planned operations to the Target Calendar, a few at a time. */
+export function applyCopyOperations(
+  target: CalendarRef,
+  operations: ReadonlyArray<CopyOperation>,
+): Effect.Effect<void, CalendarAccountNeedsReconnect | GoogleCalendarUnavailable, GoogleCalendar> {
+  return Effect.forEach(operations, (operation) => applyCopyOperation(target, operation), {
+    concurrency: 4,
+    discard: true,
+  });
+}
+
 /** Writes one planned operation to the Target Calendar. */
-export function applyCopyOperation(target: CalendarRef, operation: CopyOperation) {
+function applyCopyOperation(target: CalendarRef, operation: CopyOperation) {
   const { calendarAccountId, calendarId } = target;
 
   return GoogleCalendar.use((google) => {
